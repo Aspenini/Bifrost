@@ -201,10 +201,19 @@ dependencies = [
 [[package]]
 name = "bifrost-loader"
 version = "0.1.0"
+dependencies = [
+ "bifrost-core",
+ "bifrost-memory",
+]
 
 [[package]]
 name = "bifrost-loader-elf"
 version = "0.1.0"
+dependencies = [
+ "bifrost-core",
+ "bifrost-loader",
+ "bifrost-memory",
+]
 
 [[package]]
 name = "bifrost-loader-macho"
