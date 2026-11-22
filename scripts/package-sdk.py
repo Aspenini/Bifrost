@@ -35,6 +35,7 @@ TARGETS = {
 SOURCES = (
     ("include/bifrost.h", "crates/bifrost-ffi/include/bifrost.h"),
     ("example/main.c", "examples/c-embed/main.c"),
+    ("example/raw.c", "examples/c-embed/raw.c"),
     ("example/hello.elf", "tests/fixtures/linux/hello.elf"),
     ("LICENSE-MIT", "LICENSE-MIT"),
     ("LICENSE-APACHE", "LICENSE-APACHE"),

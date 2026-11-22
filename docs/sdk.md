@@ -6,6 +6,12 @@ Create a session with `bifrost_create()`, query a length-delimited capability ID
 
 The API returns a status code independent of the guest exit code. The exit code is valid for `BIFROST_OK` and `BIFROST_OUTPUT_TRUNCATED`. Standard output and standard error are combined in call order. If the buffer fills, the library discards remaining output and reports truncation after a successful guest exit. The output is length-delimited and may contain any byte. The C API provides empty guest input, no host mounts, and a limit of one million steps. The image and output ranges are each capped at 64 MiB.
 
+## Raw machine code
+
+`bifrost_run_raw` interprets up to 1 MiB of raw scalar x86-64 or ARM64 bytes in a fresh address space with a guarded stack. The code starts at guest address `0x10000`. Execution succeeds when the guest PC reaches exactly the end of the supplied bytes. The result holds the guest PC, RAX or X0, and the number of completed instructions. The raw path has no guest OS services.
+
+Build with `cargo build --locked -p bifrost-ffi --no-default-features` to omit both executable loaders and OS providers. In that build `bifrost_run` reports `BIFROST_UNAVAILABLE`. Compile `examples/c-embed/raw.c` using the same include and library options as the examples below, then run it without arguments. The example covers success on both guest ISAs, budget exhaustion, and a truncated instruction.
+
 Build and run the example from the repository root on Linux or macOS.
 
 ```sh

@@ -1,13 +1,20 @@
 //! Version 1 of the C embedding interface.
 #![allow(unsafe_code)]
 
+mod raw;
+pub use raw::{RawResult, bifrost_run_raw};
+
+use bifrost_runtime::{RuntimeProfile, core::CapabilityProvider};
+#[cfg(feature = "executable-images")]
 use bifrost_runtime::{
-    RuntimeProfile,
-    core::{CapabilityProvider, ExecMode},
+    core::ExecMode,
     process::{self, ApiPolicy, Io, RunError, RunOptions, Vfs, WindowsIo},
 };
-use std::{io, panic::catch_unwind, ptr, slice};
+#[cfg(feature = "executable-images")]
+use std::io;
+use std::{panic::catch_unwind, ptr, slice};
 
+#[cfg(feature = "executable-images")]
 const MAX_BYTES: usize = 64 * 1024 * 1024;
 const MAX_STEPS: u64 = 1_000_000;
 
@@ -24,6 +31,7 @@ pub enum Status {
     BudgetExhausted = 4,
     OutputTruncated = 5,
     InternalError = 6,
+    Unavailable = 7,
 }
 
 #[repr(C)]
@@ -70,7 +78,7 @@ pub unsafe extern "C" fn bifrost_capability(
     catch_unwind(|| {
         // SAFETY: Both borrows are valid for the duration of this call.
         let (session, id) = unsafe { (&*session, slice::from_raw_parts(id, len)) };
-        if id == b"c-abi" {
+        if id == b"c-abi" || id == b"c-abi-raw" {
             return 1 | 2 | 4 | 8;
         }
         let Some(item) = std::str::from_utf8(id)
@@ -93,6 +101,7 @@ pub unsafe extern "C" fn bifrost_capability(
 /// The session is live. The image is readable for its stated length. The output and result
 /// are writable, correctly aligned, and disjoint from each other and all readable inputs.
 #[unsafe(no_mangle)]
+#[cfg(feature = "executable-images")]
 pub unsafe extern "C" fn bifrost_run(
     session: *const Session,
     image: *const u8,
@@ -182,14 +191,32 @@ pub unsafe extern "C" fn bifrost_run(
     .unwrap_or(Status::InternalError)
 }
 
+/// Reports that executable image support was disabled in this build.
+#[unsafe(no_mangle)]
+#[cfg(not(feature = "executable-images"))]
+pub extern "C" fn bifrost_run(
+    _: *const Session,
+    _: *const u8,
+    _: usize,
+    _: u64,
+    _: *mut u8,
+    _: usize,
+    _: *mut RunResult,
+) -> Status {
+    Status::Unavailable
+}
+
+#[cfg(feature = "executable-images")]
 struct Capture<'a> {
     output: &'a mut [std::mem::MaybeUninit<u8>],
     written: usize,
     truncated: bool,
 }
 
+#[cfg(feature = "executable-images")]
 struct Stream<'a, 'b>(&'a std::cell::RefCell<Capture<'b>>);
 
+#[cfg(feature = "executable-images")]
 impl io::Write for Stream<'_, '_> {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
         let mut capture = self.0.borrow_mut();
