@@ -3,7 +3,7 @@
 mod verify;
 
 use bifrost_core::{
-    CpuFeature, CpuFeatureSet, GuestAddress, GuestIsa, GuestMemoryRead, GuestTarget,
+    CpuFeature, CpuFeatureSet, FaultClass, GuestAddress, GuestIsa, GuestMemoryRead, GuestTarget,
 };
 use std::fmt;
 pub use verify::{VerifiedIrBlock, VerifiedIrFunction, VerifyError, VerifyErrorKind};
@@ -186,6 +186,12 @@ pub enum MemoryAccess {
     Write,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum AddressConstraint {
+    Canonical48,
+}
+
 /// The ordered access sequence is part of the IR. This form has no atomic operations.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct MemoryLayout {
@@ -235,6 +241,12 @@ pub enum Op {
     AddressToInt {
         out: ValueId,
         value: ValueId,
+    },
+    /// Checks an instruction target before committing effects, optionally only on a taken edge.
+    CheckTarget {
+        address: ValueId,
+        when: Option<ValueId>,
+        constraint: AddressConstraint,
     },
     ReadRegister {
         out: ValueId,
@@ -289,6 +301,7 @@ pub enum Exit {
     Trap {
         code: u32,
     },
+    Fault(FaultClass),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

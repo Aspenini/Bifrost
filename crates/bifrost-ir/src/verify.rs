@@ -114,7 +114,7 @@ pub(crate) fn verify(function: IrFunction) -> Result<VerifiedIrFunction, VerifyE
             match &blocks[&id].exit {
                 Exit::Jump(edge) => pending.push(edge.target),
                 Exit::Branch { yes, no, .. } => pending.extend([yes.target, no.target]),
-                Exit::NextPc(_) | Exit::Trap { .. } => {}
+                Exit::NextPc(_) | Exit::Trap { .. } | Exit::Fault(_) => {}
             }
         }
     }
@@ -319,6 +319,13 @@ impl Values {
                 self.expect(value, Type::GuestAddress)?;
                 (out, Type::I64)
             }
+            Op::CheckTarget { address, when, .. } => {
+                self.expect(address, Type::GuestAddress)?;
+                return match when {
+                    Some(condition) => self.expect(condition, Type::I1),
+                    None => Ok(()),
+                };
+            }
             Op::ReadRegister { out, register } => (out, register_type(register)?),
             Op::WriteRegister { register, value } => {
                 return self.expect(value, register_type(register)?);
@@ -374,7 +381,7 @@ impl Values {
                 self.edge(no, blocks)
             }
             Exit::NextPc(pc) => self.expect(*pc, Type::GuestAddress),
-            Exit::Trap { .. } => Ok(()),
+            Exit::Trap { .. } | Exit::Fault(_) => Ok(()),
         }
     }
 

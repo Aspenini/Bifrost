@@ -102,6 +102,12 @@ version = "0.1.0"
 [[package]]
 name = "bifrost-lifter-x86"
 version = "0.1.0"
+dependencies = [
+ "bifrost-core",
+ "bifrost-decoder-x86",
+ "bifrost-ir",
+ "bifrost-testkit",
+]
 
 [[package]]
 name = "bifrost-loader"

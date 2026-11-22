@@ -126,6 +126,11 @@ pub enum ExecMode {
 pub struct GuestAddress(pub u64);
 
 impl GuestAddress {
+    /// Checks whether bits 63:48 are a sign extension of bit 47.
+    pub const fn is_canonical_48(self) -> bool {
+        self.0 <= 0x0000_7fff_ffff_ffff || self.0 >= 0xffff_8000_0000_0000
+    }
+
     pub const fn checked_add(self, bytes: u64) -> Option<Self> {
         match self.0.checked_add(bytes) {
             Some(value) => Some(Self(value)),
@@ -154,6 +159,8 @@ pub enum FaultClass {
     Guard,
     Alignment,
     IllegalInstruction,
+    NonCanonicalAddress,
+    Trap(u32),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

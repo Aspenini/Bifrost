@@ -8,6 +8,7 @@ This is the starter subset of the v1 format. It is an in-memory Rust representat
 - Architectural register operations use full-width registers checked against the target ISA. Guest addresses are a distinct type and convert explicitly to and from `I64`.
 - Explicit feature requirements must be present in the declared guest CPU profile. The verifier checks the declaration. A backend must also determine whether it supports the resulting IR.
 - A memory guard captures a guest address in a block-local value and pairs exactly once with a load or store at the same guest PC. The paired access must match type, alignment, endianness and access kind. Runtime checks happen at the access, including alignment, address overflow, mapping and permissions. Backend evaluation must preserve operation order and report the guest PC on failure.
-- Exits branch within the function, return a next guest PC to the dispatcher, or trap. The format currently exposes no host-call operation.
+- `CheckTarget` validates a guest instruction address before side effects. A conditional check uses an `I1` value to limit the check to the taken edge.
+- Exits branch within the function, return a next guest PC to the dispatcher, or produce a typed fault or trap. The format currently exposes no host-call operation.
 
 Floating-point and vector values are available as raw bits. Arithmetic for those types, atomics, fences, concurrent guest memory ordering, host calls, and deoptimization are future work.

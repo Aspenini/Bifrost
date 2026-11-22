@@ -103,6 +103,10 @@ pub enum DecodeError {
     Truncated {
         pc: GuestAddress,
     },
+    NonCanonical {
+        pc: GuestAddress,
+        address: GuestAddress,
+    },
     Fetch {
         pc: GuestAddress,
         source: MemoryError,
@@ -114,6 +118,11 @@ impl fmt::Display for DecodeError {
         match self {
             Self::Invalid { pc } => write!(f, "invalid x86-64 encoding at {:#x}", pc.0),
             Self::Truncated { pc } => write!(f, "truncated x86-64 instruction at {:#x}", pc.0),
+            Self::NonCanonical { pc, address } => write!(
+                f,
+                "x86-64 fetch at {:#x} reached noncanonical address {:#x}",
+                pc.0, address.0
+            ),
             Self::Fetch { pc, source } => {
                 write!(f, "x86-64 instruction fetch at {:#x}: {source}", pc.0)
             }
@@ -167,6 +176,9 @@ pub fn fetch(
             pc,
             source: MemoryError::AddressOverflow(pc),
         })?;
+        if !address.is_canonical_48() {
+            return Err(DecodeError::NonCanonical { pc, address });
+        }
         memory
             .fetch(address, &mut bytes[offset..=offset])
             .map_err(|source| DecodeError::Fetch { pc, source })?;

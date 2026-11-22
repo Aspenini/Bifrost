@@ -5,7 +5,7 @@ The first execution profile uses bare x86-64 long mode, full-width general-purpo
 | Family | Accepted forms |
 | --- | --- |
 | NOP | Single-byte opcode `90` as decoded as NOP |
-| MOV | `r64, r64`, `r64, imm64` or sign-extended `imm32`, `r64, m64`, `m64, r64`, `m64, imm32` sign-extended |
+| MOV | `r64, r64`, `r64, imm64` or sign-extended `imm32`, and ModRM forms `r64, m64`, `m64, r64`, `m64, imm32` sign-extended |
 | ADD, SUB, CMP | `r64, r64` or sign-extended `imm8/imm32`, including accumulator forms |
 | JMP, JE, JNE, JB, JAE, JL, JGE | Direct short and near relative branches |
 | CALL, RET | Near relative CALL and plain near RET, with 8-byte stack slots |
