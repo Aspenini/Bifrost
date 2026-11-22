@@ -109,6 +109,7 @@ fn allowed(package: &str) -> &'static [&'static str] {
         | "bifrost-example-execute-raw-arm64"
         | "bifrost-differential" => &["bifrost-runtime", "bifrost-testkit"],
         "bifrost-runtime" => &[
+            "bifrost-loader",
             "bifrost-abi",
             "bifrost-bridge",
             "bifrost-core",

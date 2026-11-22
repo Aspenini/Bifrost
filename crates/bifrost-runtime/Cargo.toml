@@ -8,12 +8,13 @@ publish = false
 
 [features]
 default = []
+linux-elf = ["loader-elf", "os-linux", "guest-x86_64", "interp"]
 abi-bridge = ["dep:bifrost-abi", "dep:bifrost-bridge"]
 guest-x86_64 = ["dep:bifrost-decoder-x86", "dep:bifrost-lifter-x86"]
 guest-aarch64 = ["dep:bifrost-decoder-arm64", "dep:bifrost-lifter-arm64"]
 interp = ["dep:bifrost-interpreter", "dep:bifrost-executor"]
 jit-cranelift = ["dep:bifrost-codegen-clif", "dep:bifrost-codegen", "dep:bifrost-executor", "dep:bifrost-host", "dep:bifrost-host-linux", "dep:bifrost-host-windows"]
-loader-elf = ["dep:bifrost-loader-elf"]
+loader-elf = ["dep:bifrost-loader-elf", "dep:bifrost-loader"]
 loader-pe = ["dep:bifrost-loader-pe"]
 os-linux = ["dep:bifrost-os-linux"]
 os-windows = ["dep:bifrost-os-windows"]
@@ -36,6 +37,7 @@ bifrost-codegen-clif = { workspace = true, optional = true }
 bifrost-codegen = { workspace = true, optional = true }
 bifrost-host = { workspace = true, optional = true }
 bifrost-loader-elf = { workspace = true, optional = true }
+bifrost-loader = { workspace = true, optional = true }
 bifrost-loader-pe = { workspace = true, optional = true }
 bifrost-os-linux = { workspace = true, optional = true }
 bifrost-os-windows = { workspace = true, optional = true }

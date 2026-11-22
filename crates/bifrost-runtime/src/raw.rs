@@ -221,6 +221,10 @@ pub struct RawInterpreter<'a> {
 
 #[cfg(feature = "interp")]
 impl<'a> RawInterpreter<'a> {
+    pub fn memory_mut(&mut self) -> &mut dyn GuestMemory {
+        self.memory
+    }
+
     pub fn new(
         target: &GuestTarget,
         memory: &'a mut dyn GuestMemory,

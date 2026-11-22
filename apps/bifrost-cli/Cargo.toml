@@ -11,7 +11,11 @@ name = "bifrost"
 path = "src/main.rs"
 
 [dependencies]
-bifrost-runtime.workspace = true
+bifrost-runtime = { workspace = true, features = ["linux-elf"] }
+
+[features]
+default = ["jit"]
+jit = ["bifrost-runtime/jit-cranelift"]
 
 [lints]
 workspace = true
