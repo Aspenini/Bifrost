@@ -1,0 +1,18 @@
+[package]
+name = "bifrost-differential"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[[test]]
+name = "native-x86"
+path = "native_x86.rs"
+
+[dev-dependencies]
+bifrost-runtime = { workspace = true, features = ["guest-x86_64", "interp"] }
+bifrost-testkit.workspace = true
+
+[lints.rust]
+unsafe_code = "deny"

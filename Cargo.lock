@@ -47,6 +47,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "bifrost-differential"
+version = "0.1.0"
+dependencies = [
+ "bifrost-runtime",
+ "bifrost-testkit",
+]
+
+[[package]]
 name = "bifrost-example-execute-raw-x86"
 version = "0.1.0"
 dependencies = [

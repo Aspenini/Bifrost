@@ -16,3 +16,5 @@ Memory operands use 64-bit addressing, including SIB and RIP-relative addressing
 ADD, SUB, and CMP set CF, PF, AF, ZF, SF, and OF. PF is the even parity of the result's low byte. CMP updates flags without storing its result. Other supported instructions preserve flags. JE/JNE test ZF, JB/JAE test CF, and JL/JGE compare SF and OF. An unsupported valid instruction produces a typed error. Invalid encoding, instruction fetch failures, and execution faults identify the guest PC.
 
 The deterministic fixture vectors live in `bifrost-testkit`. They record the machine bytes, initial register values, and expected effects independently of the decoder and lifter.
+
+The differential tests run fixed native assembly on x86-64 hosts. They compare 4,860 arithmetic cases across the accepted register and immediate encodings and 468 conditional branch cases across short and near forms. Other cases compare register and memory results, RIP-relative addressing, jumps, and CALL/RET stack state. The ordinary Rust fixtures check guest faults, including UD2, without raising host exceptions.

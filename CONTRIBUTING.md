@@ -15,4 +15,6 @@ cargo run --locked -p bifrost-example-execute-raw-x86
 cargo run --locked -p bifrost-cli -- capabilities
 ```
 
+On x86-64 hosts, `cargo test --locked -p bifrost-differential` compares the interpreter against assembly compiled into the test executable. The native reference code uses fixed inputs and a test-only assembly module.
+
 Scope changes to a crate or a narrow feature. Record cross-crate changes in an ADR, update the dependency allowlist with any new edge, and add a deterministic fixture for every newly claimed guest-visible behavior. Include both accepted and rejected inputs. Checked-in fixture bytes and IR are hand-authored for Bifröst.
