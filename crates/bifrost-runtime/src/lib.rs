@@ -50,25 +50,15 @@ fn supports_raw_profile(target: &GuestTarget) -> bool {
 
 const JIT_HOST: bool = cfg!(all(
     feature = "jit-cranelift",
-    any(
-        all(
-            target_arch = "x86_64",
-            any(target_os = "linux", target_os = "windows")
-        ),
-        all(target_arch = "aarch64", target_os = "linux")
-    )
+    any(target_arch = "x86_64", target_arch = "aarch64"),
+    any(target_os = "linux", target_os = "windows")
 ));
 
 fn probe_jit() -> bool {
     #[cfg(all(
         feature = "jit-cranelift",
-        any(
-            all(
-                target_arch = "x86_64",
-                any(target_os = "linux", target_os = "windows")
-            ),
-            all(target_arch = "aarch64", target_os = "linux")
-        )
+        any(target_arch = "x86_64", target_arch = "aarch64"),
+        any(target_os = "linux", target_os = "windows")
     ))]
     {
         use bifrost_host::jit::JitMemoryManager;
@@ -81,13 +71,8 @@ fn probe_jit() -> bool {
     }
     #[cfg(not(all(
         feature = "jit-cranelift",
-        any(
-            all(
-                target_arch = "x86_64",
-                any(target_os = "linux", target_os = "windows")
-            ),
-            all(target_arch = "aarch64", target_os = "linux")
-        )
+        any(target_arch = "x86_64", target_arch = "aarch64"),
+        any(target_os = "linux", target_os = "windows")
     )))]
     {
         false

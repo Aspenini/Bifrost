@@ -74,6 +74,7 @@ impl<'a> Linux<'a> {
             0 => self.read(arg0, GuestAddress(arg1), arg2, memory),
             1 => self.write(arg0, GuestAddress(arg1), arg2, memory),
             3 => self.close(arg0),
+            39 | 186 => 1, // Synthetic process and initial thread ID.
             60 | 231 => return Ok(SyscallExit::Exit(arg0 as u8)),
             257 => self.openat(arg0, GuestAddress(arg1), arg2, memory),
             _ => {

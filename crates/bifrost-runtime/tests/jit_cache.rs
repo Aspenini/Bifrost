@@ -1,13 +1,8 @@
 #![cfg(all(
     feature = "guest-x86_64",
     feature = "jit-cranelift",
-    any(
-        all(
-            target_arch = "x86_64",
-            any(target_os = "linux", target_os = "windows")
-        ),
-        all(target_arch = "aarch64", target_os = "linux")
-    )
+    any(target_arch = "x86_64", target_arch = "aarch64"),
+    any(target_os = "linux", target_os = "windows")
 ))]
 
 use bifrost_runtime::{
@@ -26,7 +21,7 @@ fn space(immediate: u8) -> AddressSpace {
     memory
         .write(Addr(0x100e), &[0x48, 0xb8, immediate, 0, 0, 0, 0, 0, 0, 0])
         .unwrap();
-    memory.write(CODE, &[0x90]).unwrap();
+    memory.write(CODE, &[0x90, 0x90]).unwrap();
     memory.protect(CODE, 32, Protection::ReadExecute).unwrap();
     memory
 }
@@ -144,6 +139,19 @@ fn replacing_an_address_space_cannot_reuse_matching_generations() {
             resident: 1
         }
     );
+}
+
+#[test]
+fn evicts_the_least_recently_used_block() {
+    let mut memory = space(7);
+    let mut trace = ();
+    let mut jit = X86Jit::new(&mut memory, &mut trace, SystemJitMemory).unwrap();
+    let mut thread = thread();
+    jit.set_cache_capacity(2);
+    for pc in [Addr(0x100e), CODE, CODE, Addr(0x1001), CODE] {
+        step(&mut jit, &mut thread, pc);
+    }
+    assert_eq!(jit.cache_stats().hits, 2);
 }
 
 #[test]

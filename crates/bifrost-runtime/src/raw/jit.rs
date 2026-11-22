@@ -13,7 +13,10 @@ use std::collections::BTreeMap;
     any(target_arch = "x86_64", target_arch = "aarch64")
 ))]
 pub use bifrost_host_linux::jit::LinuxJitMemory as SystemJitMemory;
-#[cfg(all(target_arch = "x86_64", target_os = "windows"))]
+#[cfg(all(
+    any(target_arch = "x86_64", target_arch = "aarch64"),
+    target_os = "windows"
+))]
 pub use bifrost_host_windows::jit::WindowsJitMemory as SystemJitMemory;
 
 const DEFAULT_CACHE_CAPACITY: usize = 256;
@@ -22,6 +25,7 @@ const MAX_INSTRUCTION_BYTES: usize = 15;
 struct CachedBlock<Image> {
     span: CodeSpan,
     generations: [u64; MAX_INSTRUCTION_BYTES],
+    last_used: u64,
     code: PublishedBlock<Image>,
 }
 
@@ -100,7 +104,13 @@ impl<'a, M: JitMemoryManager> RawJit<'a, M> {
     pub fn set_cache_capacity(&mut self, capacity: usize) {
         self.cache_capacity = capacity;
         while self.cache.len() > capacity {
-            self.cache.pop_first();
+            self.evict_oldest();
+        }
+    }
+
+    fn evict_oldest(&mut self) {
+        if let Some((&pc, _)) = self.cache.iter().min_by_key(|(_, entry)| entry.last_used) {
+            self.cache.remove(&pc);
         }
     }
 
@@ -150,13 +160,14 @@ impl<'a, M: JitMemoryManager> RawJit<'a, M> {
                 && let Some(generations) = code_generations(self.memory, span)
             {
                 if self.cache.len() == self.cache_capacity {
-                    self.cache.pop_first();
+                    self.evict_oldest();
                 }
                 self.cache.insert(
                     pc,
                     CachedBlock {
                         span,
                         generations,
+                        last_used: self.hits.saturating_add(self.misses),
                         code: published,
                     },
                 );
@@ -168,7 +179,11 @@ impl<'a, M: JitMemoryManager> RawJit<'a, M> {
         }
         let published = match uncached.as_ref() {
             Some(code) => code,
-            None => &self.cache.get(&pc).expect("cache hit or insertion").code,
+            None => {
+                let entry = self.cache.get_mut(&pc).expect("cache hit or insertion");
+                entry.last_used = self.hits.saturating_add(self.misses);
+                &entry.code
+            }
         };
         self.trace.record(TraceEvent::Step {
             thread: thread.id,

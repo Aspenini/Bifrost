@@ -10,7 +10,7 @@ use std::{
     path::Path,
 };
 
-const USAGE: &str = "Usage: bifrost capabilities | inspect FILE | run [--exec auto|interp|jit] [--api auto|portable|native] [--mount /guest=HOST] FILE [-- ARGS...]";
+const USAGE: &str = "Usage: bifrost capabilities [--json] | inspect FILE | run [--exec auto|interp|jit] [--api auto|portable|native] [--max-steps N] [--mount /guest=HOST] FILE [-- ARGS...]";
 const MAX_FILE: u64 = 64 * 1024 * 1024;
 type Error = Box<dyn std::error::Error>;
 
@@ -29,6 +29,7 @@ fn command(args: Vec<OsString>) -> Result<u32, Error> {
         [] => println!("{USAGE}"),
         [flag] if flag == "--help" || flag == "-h" => println!("{USAGE}"),
         [command] if command == "capabilities" => capabilities(),
+        [command, flag] if command == "capabilities" && flag == "--json" => capabilities_json(),
         [command, path] if command == "inspect" => {
             let image = read_file(Path::new(path))?;
             let metadata = process::inspect(&image)?;
@@ -70,6 +71,30 @@ fn capabilities() {
     }
 }
 
+fn capabilities_json() {
+    let profile = RuntimeProfile::default();
+    let host = profile.host();
+    println!(
+        "{{\"schema\":1,\"host\":{{\"os\":\"{:?}\",\"isa\":\"{:?}\",\"executable_memory\":\"{:?}\"}},\"capabilities\":[",
+        host.os, host.isa, host.executable_memory
+    );
+    for (index, item) in profile.capabilities().iter().enumerate() {
+        if index != 0 {
+            println!(",");
+        }
+        print!(
+            "{{\"id\":\"{}\",\"compiled\":{},\"implemented\":{},\"available\":{},\"validated\":{},\"support\":\"{:?}\"}}",
+            item.id(),
+            item.compiled(),
+            item.implemented_on_any_host(),
+            item.host_available(),
+            item.validated(),
+            item.level()
+        );
+    }
+    println!("]}}");
+}
+
 fn read_file(path: &Path) -> Result<Vec<u8>, Error> {
     let file = File::open(path)?;
     let mut bytes = Vec::new();
@@ -95,6 +120,13 @@ fn run(args: &[OsString]) -> Result<u32, Error> {
                 Some("jit") => ExecMode::Jit,
                 _ => return Err("expected --exec auto, interp or jit".into()),
             };
+        } else if next == "--max-steps" {
+            options.instruction_limit = args
+                .next()
+                .and_then(|word| word.to_str())
+                .and_then(|word| word.parse().ok())
+                .filter(|limit| *limit > 0)
+                .ok_or("expected a positive instruction limit")?;
         } else if next == "--api" {
             api = Some(match args.next().and_then(|word| word.to_str()) {
                 Some("auto") => ApiPolicy::Auto,

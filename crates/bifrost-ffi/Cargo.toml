@@ -6,5 +6,11 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
-[lints]
-workspace = true
+[lib]
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dependencies]
+bifrost-runtime = { workspace = true, features = ["linux-elf", "windows-pe"] }
+
+[lints.rust]
+unsafe_code = "deny"

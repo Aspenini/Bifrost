@@ -117,6 +117,11 @@ impl X86Lifter {
                 }
                 ir.fallthrough(next)
             }
+            Operation::Lea { dst, address } => {
+                let value = ir.effective_offset(address, next);
+                ir.write(gpr(dst), value);
+                ir.fallthrough(next)
+            }
             Operation::Arithmetic { op, dst, src } => {
                 let lhs = ir.read(gpr(dst));
                 let rhs = ir.operand(src, next);
@@ -299,6 +304,11 @@ impl Builder {
     }
 
     fn effective_address(&mut self, address: MemoryOperand, next: GuestAddress) -> ValueId {
+        let offset = self.effective_offset(address, next);
+        self.int_to_address(offset)
+    }
+
+    fn effective_offset(&mut self, address: MemoryOperand, next: GuestAddress) -> ValueId {
         let value = match address.base {
             MemoryBase::None => self.integer(address.displacement),
             MemoryBase::Rip => self.integer(next.0.wrapping_add(address.displacement)),
@@ -307,15 +317,14 @@ impl Builder {
                 self.with_immediate(IntOp::Add, base, address.displacement)
             }
         };
-        let value = match address.index {
+        match address.index {
             Some((reg, scale)) => {
                 let index = self.read(gpr(reg));
                 let scaled = self.with_immediate(IntOp::Mul, index, u64::from(scale));
                 self.binary(IntOp::Add, value, scaled)
             }
             None => value,
-        };
-        self.int_to_address(value)
+        }
     }
 
     fn operand(&mut self, operand: Operand, next: GuestAddress) -> ValueId {

@@ -61,8 +61,8 @@ impl fmt::Display for RunError {
             Self::Mode(error) => error.fmt(f),
             Self::Fault(fault) => write!(
                 f,
-                "guest {:?} fault at {:#x} ({:?})",
-                fault.class, fault.pc.0, fault.memory_access
+                "guest thread {} {:?} fault at {:#x} (memory access {:?})",
+                fault.thread.0, fault.class, fault.pc.0, fault.memory_access
             ),
             Self::Budget => f.write_str("guest instruction budget exhausted"),
             Self::Backend => f.write_str("invalid process execution backend"),
@@ -204,13 +204,8 @@ fn execute(
         }
         #[cfg(all(
             feature = "jit-cranelift",
-            any(
-                all(
-                    target_arch = "x86_64",
-                    any(target_os = "windows", target_os = "linux")
-                ),
-                all(target_arch = "aarch64", target_os = "linux")
-            )
+            any(target_arch = "x86_64", target_arch = "aarch64"),
+            any(target_os = "linux", target_os = "windows")
         ))]
         ExecMode::Jit => Engine::Jit(Box::new(crate::raw::RawJit::new(
             &target,
@@ -239,13 +234,8 @@ enum Engine<'a> {
     Interpreter(RawInterpreter<'a>),
     #[cfg(all(
         feature = "jit-cranelift",
-        any(
-            all(
-                target_arch = "x86_64",
-                any(target_os = "windows", target_os = "linux")
-            ),
-            all(target_arch = "aarch64", target_os = "linux")
-        )
+        any(target_arch = "x86_64", target_arch = "aarch64"),
+        any(target_os = "linux", target_os = "windows")
     ))]
     Jit(Box<crate::raw::RawJit<'a, crate::raw::SystemJitMemory>>),
 }
@@ -256,13 +246,8 @@ impl Engine<'_> {
             Self::Interpreter(engine) => engine.memory_mut(),
             #[cfg(all(
                 feature = "jit-cranelift",
-                any(
-                    all(
-                        target_arch = "x86_64",
-                        any(target_os = "windows", target_os = "linux")
-                    ),
-                    all(target_arch = "aarch64", target_os = "linux")
-                )
+                any(target_arch = "x86_64", target_arch = "aarch64"),
+                any(target_os = "linux", target_os = "windows")
             ))]
             Self::Jit(engine) => engine.memory_mut(),
         }
@@ -273,13 +258,8 @@ impl Engine<'_> {
             Self::Interpreter(engine) => engine.step(thread),
             #[cfg(all(
                 feature = "jit-cranelift",
-                any(
-                    all(
-                        target_arch = "x86_64",
-                        any(target_os = "windows", target_os = "linux")
-                    ),
-                    all(target_arch = "aarch64", target_os = "linux")
-                )
+                any(target_arch = "x86_64", target_arch = "aarch64"),
+                any(target_os = "linux", target_os = "windows")
             ))]
             Self::Jit(engine) => engine.step(thread),
         }

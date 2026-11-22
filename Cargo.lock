@@ -133,6 +133,9 @@ dependencies = [
 [[package]]
 name = "bifrost-ffi"
 version = "0.1.0"
+dependencies = [
+ "bifrost-runtime",
+]
 
 [[package]]
 name = "bifrost-host"

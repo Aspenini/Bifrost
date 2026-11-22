@@ -10,7 +10,7 @@ publish = false
 bifrost-abi.workspace = true
 bifrost-core.workspace = true
 
-[target.'cfg(all(target_os = "windows", target_arch = "x86_64"))'.dependencies]
+[target.'cfg(all(target_os = "windows", any(target_arch = "x86_64", target_arch = "aarch64")))'.dependencies]
 bifrost-host-windows.workspace = true
 
 [lints]

@@ -44,3 +44,15 @@ fn missing_syscall_reports_number_and_guest_pc() {
     assert!(result.stdout.is_empty());
     assert!(String::from_utf8_lossy(&result.stderr).contains("syscall 999 at 0x"));
 }
+
+#[test]
+fn reports_instruction_budget_exhaustion() {
+    let result = Command::new(env!("CARGO_BIN_EXE_bifrost"))
+        .args(["run", "--exec", "interp", "--max-steps", "1"])
+        .arg(fixture("hello.elf"))
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    assert!(result.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("instruction budget exhausted"));
+}

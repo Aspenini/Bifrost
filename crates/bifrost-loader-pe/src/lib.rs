@@ -252,6 +252,11 @@ impl Pe<'_> {
             memory.protect(page, PAGE, import.protection)?;
         }
         memory.map(
+            GuestAddress(STACK_TOP - STACK_SIZE - PAGE),
+            PAGE,
+            Protection::Guard,
+        )?;
+        memory.map(
             GuestAddress(STACK_TOP - STACK_SIZE),
             STACK_SIZE,
             Protection::ReadWrite,
@@ -264,5 +269,50 @@ impl Pe<'_> {
         };
         state.gpr[4] = sp;
         Ok((memory, state))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bifrost_core::GuestMemoryRead;
+
+    const FIXTURE: &[u8] = include_bytes!("../../../tests/fixtures/windows/hello.exe");
+
+    #[test]
+    fn imports_are_resolved_in_guest_memory() {
+        let pe = parse(FIXTURE).unwrap();
+        assert_eq!(
+            pe.imports
+                .iter()
+                .map(|import| import.symbol)
+                .collect::<Vec<_>>(),
+            ["ExitProcess", "GetStdHandle", "WriteFile"]
+        );
+        let targets = [
+            GuestAddress(0x1000),
+            GuestAddress(0x1010),
+            GuestAddress(0x1020),
+        ];
+        let (memory, state) = pe.start(&targets, GuestAddress(0x1030)).unwrap();
+        assert_eq!(state.gpr[4] % 16, 8);
+        for (import, target) in pe.imports.iter().zip(targets) {
+            let mut address = [0; 8];
+            memory.read(import.slot, &mut address).unwrap();
+            assert_eq!(u64::from_le_bytes(address), target.0);
+        }
+    }
+
+    #[test]
+    fn rejects_truncated_and_out_of_range_headers() {
+        for size in 0..FIXTURE.len() {
+            assert!(
+                parse(&FIXTURE[..size]).is_err(),
+                "accepted prefix of {size} bytes"
+            );
+        }
+        let mut invalid = FIXTURE.to_vec();
+        invalid[0x3c..0x40].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert!(parse(&invalid).is_err());
     }
 }

@@ -1,0 +1,75 @@
+name: SDK packages
+
+on:
+  pull_request:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  assemble:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+          - runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+          - runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - runner: macos-15
+            target: aarch64-apple-darwin
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - name: Build release SDK
+        run: cargo build --locked --release -p bifrost-cli -p bifrost-ffi
+      - name: Run guest fixtures
+        run: cargo test --locked --release -p bifrost-cli
+      - name: Compile and run C example (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          clang --target=${{ matrix.target }} -Wall -Wextra -Werror -I crates/bifrost-ffi/include examples/c-embed/main.c target/release/bifrost_ffi.dll.lib -o target/release/c-embed.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./target/release/c-embed.exe tests/fixtures/linux/hello.elf
+      - name: Compile and run C example (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cc -Wall -Wextra -Werror -I crates/bifrost-ffi/include examples/c-embed/main.c -L target/release -lbifrost_ffi -Wl,-rpath,"$PWD/target/release" -o target/release/c-embed
+          ./target/release/c-embed tests/fixtures/linux/hello.elf
+      - name: Stage SDK
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force package/bin,package/lib,package/include,package/example
+          if ($IsWindows) {
+              Copy-Item target/release/bifrost.exe,target/release/bifrost_ffi.dll package/bin
+              Copy-Item target/release/bifrost_ffi.dll.lib,target/release/bifrost_ffi.lib package/lib
+          } elseif ($IsMacOS) {
+              Copy-Item target/release/bifrost package/bin
+              Copy-Item target/release/libbifrost_ffi.dylib,target/release/libbifrost_ffi.a package/lib
+          } else {
+              Copy-Item target/release/bifrost package/bin
+              Copy-Item target/release/libbifrost_ffi.so,target/release/libbifrost_ffi.a package/lib
+          }
+          Copy-Item crates/bifrost-ffi/include/bifrost.h package/include
+          Copy-Item examples/c-embed/main.c,tests/fixtures/linux/hello.elf package/example
+          Copy-Item LICENSE-MIT,LICENSE-APACHE,docs/sdk.md package
+      - name: Archive SDK
+        shell: bash
+        run: tar -C package -czf bifrost-${{ matrix.target }}.tar.gz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bifrost-${{ matrix.target }}
+          path: bifrost-${{ matrix.target }}.tar.gz
+          if-no-files-found: error

@@ -52,6 +52,10 @@ pub enum Operation {
         dst: Operand,
         src: Operand,
     },
+    Lea {
+        dst: u8,
+        address: MemoryOperand,
+    },
     Arithmetic {
         op: Arithmetic,
         dst: u8,
@@ -241,6 +245,15 @@ fn classify(inst: &Instruction, bytes: &[u8]) -> Option<Operation> {
         Jl_rel8_64 | Jl_rel32_64 => branch(Some(Condition::Less)),
         Jge_rel8_64 | Jge_rel32_64 => branch(Some(Condition::GreaterOrEqual)),
         Call_rel32_64 => Operation::Call(GuestAddress(inst.near_branch64())),
+        Lea_r64_m => {
+            let Operand::Register(dst) = operand(inst, 0)? else {
+                return None;
+            };
+            let Operand::Memory(address) = operand(inst, 1)? else {
+                return None;
+            };
+            Operation::Lea { dst, address }
+        }
         Call_rm64 => Operation::CallIndirect(operand(inst, 0)?),
         Retnq => Operation::Return,
         Ud2 => Operation::Ud2,

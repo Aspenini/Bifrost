@@ -44,13 +44,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(all(
     feature = "jit-cranelift",
-    any(
-        all(
-            target_arch = "x86_64",
-            any(target_os = "linux", target_os = "windows")
-        ),
-        all(target_arch = "aarch64", target_os = "linux")
-    )
+    any(target_arch = "x86_64", target_arch = "aarch64"),
+    any(target_os = "linux", target_os = "windows")
 ))]
 fn execute(
     target: &GuestTarget,
@@ -65,13 +60,8 @@ fn execute(
 
 #[cfg(not(all(
     feature = "jit-cranelift",
-    any(
-        all(
-            target_arch = "x86_64",
-            any(target_os = "linux", target_os = "windows")
-        ),
-        all(target_arch = "aarch64", target_os = "linux")
-    )
+    any(target_arch = "x86_64", target_arch = "aarch64"),
+    any(target_os = "linux", target_os = "windows")
 )))]
 fn execute(
     target: &GuestTarget,

@@ -151,13 +151,8 @@ fn validates_arm64_feature_requirements_at_construction() {
 
 #[cfg(all(
     feature = "jit-cranelift",
-    any(
-        all(
-            target_arch = "x86_64",
-            any(target_os = "linux", target_os = "windows")
-        ),
-        all(target_arch = "aarch64", target_os = "linux")
-    )
+    any(target_arch = "x86_64", target_arch = "aarch64"),
+    any(target_os = "linux", target_os = "windows")
 ))]
 #[test]
 fn arm64_jit_agrees_on_guest_state_faults_and_trace() {
@@ -232,13 +227,8 @@ fn arm64_jit_agrees_on_guest_state_faults_and_trace() {
 
 #[cfg(all(
     feature = "jit-cranelift",
-    any(
-        all(
-            target_arch = "x86_64",
-            any(target_os = "linux", target_os = "windows")
-        ),
-        all(target_arch = "aarch64", target_os = "linux")
-    )
+    any(target_arch = "x86_64", target_arch = "aarch64"),
+    any(target_os = "linux", target_os = "windows")
 ))]
 #[test]
 fn arm64_cache_checks_all_code_page_generations() {

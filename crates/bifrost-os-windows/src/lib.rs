@@ -58,7 +58,10 @@ pub fn resolve(module: &str, symbol: &str) -> Option<GuestAddress> {
 }
 
 pub fn native_available() -> bool {
-    cfg!(all(target_os = "windows", target_arch = "x86_64"))
+    cfg!(all(
+        target_os = "windows",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ))
 }
 
 pub struct Io<'a> {
@@ -298,11 +301,17 @@ fn service_index(address: GuestAddress) -> Option<usize> {
 }
 
 fn native_write(stderr: bool, bytes: &[u8]) -> std::io::Result<usize> {
-    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    #[cfg(all(
+        target_os = "windows",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ))]
     {
         bifrost_host_windows::console::write_standard(stderr, bytes)
     }
-    #[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
+    #[cfg(not(all(
+        target_os = "windows",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    )))]
     {
         let _ = (stderr, bytes);
         Err(std::io::Error::from(std::io::ErrorKind::Unsupported))

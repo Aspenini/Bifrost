@@ -35,7 +35,7 @@ The raw-code examples print `RAX = 42, RIP = 0x1018` for x86-64 and `X0 = 43, PC
 | `bifrost-abi`, `bifrost-bridge` | Four guest call descriptors, typed native bindings and synchronous callbacks |
 | `bifrost-testkit` | Deterministic IR, x86-64 and ARM64 fixtures |
 
-See the [execution model](docs/execution-model.md), [ABI bridging](docs/abi-bridging.md), and [capability matrix](docs/capability-matrix.md) for scope and feature requirements. The CLI inspects and runs the documented [static Linux ELF](docs/linux-elf.md) and [fixed-base Windows PE](docs/windows-pe.md) subsets.
+See the [execution model](docs/execution-model.md), [ABI bridging](docs/abi-bridging.md), and [capability matrix](docs/capability-matrix.md) for scope and feature requirements. The CLI and [C SDK](docs/sdk.md) run the documented [static Linux ELF](docs/linux-elf.md) and [fixed-base Windows PE](docs/windows-pe.md) subsets.
 
 ## Verify the workspace
 
