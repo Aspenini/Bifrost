@@ -33,8 +33,21 @@ impl Default for RuntimeProfile {
                 .register(record)
                 .expect("unique built-in capability");
         }
+        let decoder = if cfg!(feature = "guest-x86_64") {
+            Capability::implemented(
+                "decode-x86_64",
+                true,
+                SupportLevel::Partial,
+                "64-bit decoding with normalized operands for the scalar subset",
+            )
+            .expect("implemented decoder level")
+        } else {
+            Capability::planned("decode-x86_64", false, "enable guest-x86_64")
+        };
+        capabilities
+            .register(decoder)
+            .expect("unique decoder capability");
         for (id, compiled) in [
-            ("decode-x86_64", cfg!(feature = "guest-x86_64")),
             ("decode-aarch64", cfg!(feature = "guest-aarch64")),
             ("interpreter", cfg!(feature = "interp")),
             ("jit-cranelift", cfg!(feature = "jit-cranelift")),

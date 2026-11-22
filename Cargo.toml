@@ -41,6 +41,7 @@ rust-version = "1.97.1"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
+iced-x86 = { version = "=1.22.0", default-features = false, features = ["std", "decoder"] }
 bifrost-core = { path = "crates/bifrost-core", version = "0.1.0", default-features = false }
 bifrost-ir = { path = "crates/bifrost-ir", version = "0.1.0", default-features = false }
 bifrost-decoder-x86 = { path = "crates/bifrost-decoder-x86", version = "0.1.0", default-features = false }

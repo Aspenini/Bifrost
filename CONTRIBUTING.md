@@ -1,6 +1,6 @@
 # Contributing
 
-Use the pinned Rust toolchain from rustup. The starter workspace has no third-party Rust dependencies.
+Use the pinned Rust toolchain from rustup. The x86-64 decoder uses iced-x86 (MIT), with only the decoder and standard-library features enabled. Cargo.lock pins its dependencies.
 
 ```sh
 cargo fmt --all --check
