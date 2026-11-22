@@ -3,6 +3,8 @@
 #[allow(unsafe_code)]
 mod hardware;
 
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+use bifrost_runtime::x86::{SystemJitMemory, X86Jit};
 use bifrost_runtime::{
     core::{CpuState, GuestAddress as Addr, GuestThread, GuestThreadId, X86State},
     memory::{AddressSpace, GuestMemory, GuestMemoryRead, Protection},
@@ -14,7 +16,7 @@ use hardware::{Arithmetic, Branch};
 const ENTRY: Addr = Addr(0x1000);
 const DATA: Addr = Addr(0x2000);
 
-fn interpret(code: &[u8], count: u64, registers: &[(usize, u64)]) -> (X86State, AddressSpace) {
+fn address_space(code: &[u8]) -> AddressSpace {
     let mut memory = AddressSpace::new(4096, 2).unwrap();
     memory.map(ENTRY, 4096, Protection::ReadWrite).unwrap();
     memory.write(ENTRY, code).unwrap();
@@ -22,7 +24,11 @@ fn interpret(code: &[u8], count: u64, registers: &[(usize, u64)]) -> (X86State, 
         .protect(ENTRY, 4096, Protection::ReadExecute)
         .unwrap();
     memory.map(DATA, 4096, Protection::ReadWrite).unwrap();
+    memory
+}
 
+fn interpret(code: &[u8], count: u64, registers: &[(usize, u64)]) -> (X86State, AddressSpace) {
+    let mut memory = address_space(code);
     let mut cpu = X86State {
         rip: ENTRY,
         ..X86State::default()
@@ -35,15 +41,29 @@ fn interpret(code: &[u8], count: u64, registers: &[(usize, u64)]) -> (X86State, 
         cpu: CpuState::X86_64(Box::new(cpu)),
         pending_fault: None,
     };
+    let budget = ExecutionBudget {
+        instructions: count,
+    };
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    let mut jitted = thread.clone();
     let exit = X86Interpreter::new(&mut memory, &mut ())
-        .run(
-            &mut thread,
-            ExecutionBudget {
-                instructions: count,
-            },
-        )
+        .run(&mut thread, budget)
         .unwrap();
     assert_eq!(exit, ExitReason::BudgetExhausted);
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    {
+        let mut native_memory = address_space(code);
+        let actual = X86Jit::new(&mut native_memory, &mut (), SystemJitMemory)
+            .unwrap()
+            .run(&mut jitted, budget)
+            .unwrap();
+        assert_eq!(actual, exit);
+        assert_eq!(jitted, thread, "JIT CPU state for {code:02x?}");
+        let (mut native_data, mut interp_data) = ([0; 4096], [0; 4096]);
+        native_memory.read(DATA, &mut native_data).unwrap();
+        memory.read(DATA, &mut interp_data).unwrap();
+        assert_eq!(native_data, interp_data, "JIT memory for {code:02x?}");
+    }
     let CpuState::X86_64(cpu) = thread.cpu else {
         unreachable!("the fixture uses x86");
     };

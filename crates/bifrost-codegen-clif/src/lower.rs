@@ -1,11 +1,14 @@
 use crate::CompileError;
 use bifrost_core::{FaultClass, GuestAddress};
 use bifrost_ir::{
-    AddressConstraint, Exit, IntOp, IntPredicate, IrBlock, Op, Register, ShiftCount, ShiftOp, Type,
-    ValueId, X86Reg,
+    AddressConstraint, Endian, Exit, IntOp, IntPredicate, IrBlock, MemoryLayout, Op, Register,
+    ShiftCount, ShiftOp, Type, ValueId, X86Reg,
 };
 use cranelift_codegen::{
-    ir::{AbiParam, Function, InstBuilder, MemFlagsData, Value, condcodes::IntCC, types},
+    ir::{
+        AbiParam, Function, InstBuilder, MemFlagsData, SigRef, Signature, Value, condcodes::IntCC,
+        types,
+    },
     isa::TargetIsa,
 };
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
@@ -15,10 +18,12 @@ use std::collections::BTreeMap;
 pub(crate) const FLAGS: i32 = 16 * 8;
 pub(crate) const NEXT_PC: i32 = 17 * 8;
 pub(crate) const FAULT_DETAIL: i32 = 18 * 8;
+pub(crate) const HELPER_VALUE: i32 = 19 * 8;
 pub(crate) const DISPATCH: i64 = 0;
 pub(crate) const NONCANONICAL: i64 = 1;
 pub(crate) const ILLEGAL: i64 = 2;
 pub(crate) const TRAP: i64 = 3;
+pub(crate) const HELPER_FAILED: i64 = 4;
 
 pub(crate) fn into_function(
     function: &mut Function,
@@ -26,10 +31,12 @@ pub(crate) fn into_function(
     block: &IrBlock,
 ) -> Result<(), CompileError> {
     function.signature.call_conv = isa.default_call_conv();
-    function
-        .signature
-        .params
-        .push(AbiParam::new(isa.pointer_type()));
+    for _ in 0..3 {
+        function
+            .signature
+            .params
+            .push(AbiParam::new(isa.pointer_type()));
+    }
     function.signature.returns.push(AbiParam::new(types::I32));
     let mut context = FunctionBuilderContext::new();
     let mut builder = FunctionBuilder::new(function, &mut context);
@@ -37,10 +44,28 @@ pub(crate) fn into_function(
     builder.append_block_params_for_function_params(entry);
     builder.switch_to_block(entry);
     let frame = builder.block_params(entry)[0];
+    let memory = builder.block_params(entry)[1];
+    let helper = builder.block_params(entry)[2];
+    let mut signature = Signature::new(isa.default_call_conv());
+    for ty in [
+        isa.pointer_type(),
+        isa.pointer_type(),
+        types::I64,
+        types::I64,
+        types::I32,
+    ] {
+        signature.params.push(AbiParam::new(ty));
+    }
+    signature.returns.push(AbiParam::new(types::I32));
+    let helper_signature = builder.import_signature(signature);
     let mut lowering = Lowering {
         builder,
         frame,
+        memory,
+        helper,
+        helper_signature,
         values: BTreeMap::new(),
+        guards: BTreeMap::new(),
         pc: block.span.start,
     };
     for instruction in &block.instructions {
@@ -62,7 +87,11 @@ struct Scalar {
 struct Lowering<'a> {
     builder: FunctionBuilder<'a>,
     frame: Value,
+    memory: Value,
+    helper: Value,
+    helper_signature: SigRef,
     values: BTreeMap<ValueId, Scalar>,
+    guards: BTreeMap<ValueId, Value>,
     pc: GuestAddress,
 }
 
@@ -197,6 +226,28 @@ impl Lowering<'_> {
                 self.store(offset, self.values[&value].value);
                 return Ok(());
             }
+            Op::Guard { out, address, .. } => {
+                self.guards.insert(out, self.values[&address].value);
+                return Ok(());
+            }
+            Op::Load { out, guard, layout } => {
+                let zero = self.immediate(0);
+                self.memory_access(guard, zero, layout, false)?;
+                let value = self.builder.ins().load(
+                    types::I64,
+                    MemFlagsData::trusted(),
+                    self.frame,
+                    HELPER_VALUE,
+                );
+                (out, value, layout.ty.bit_width())
+            }
+            Op::Store {
+                guard,
+                value,
+                layout,
+            } => {
+                return self.memory_access(guard, self.values[&value].value, layout, true);
+            }
             _ => return Err(self.unsupported("IR operation")),
         };
         let value = self.mask(value, width);
@@ -206,6 +257,37 @@ impl Lowering<'_> {
 
     fn immediate(&mut self, bits: i64) -> Value {
         self.builder.ins().iconst(types::I64, bits)
+    }
+
+    fn memory_access(
+        &mut self,
+        guard: ValueId,
+        value: Value,
+        layout: MemoryLayout,
+        write: bool,
+    ) -> Result<(), CompileError> {
+        let width = layout
+            .ty
+            .storage_bytes()
+            .filter(|&size| size <= 8)
+            .ok_or_else(|| self.unsupported("memory width"))?;
+        let mut options = u32::from(width) | (u32::from(layout.alignment) << 8);
+        options |= u32::from(layout.endian == Endian::Big) << 16;
+        options |= u32::from(write) << 17;
+        let options = self.builder.ins().iconst(types::I32, i64::from(options));
+        let call = self.builder.ins().call_indirect(
+            self.helper_signature,
+            self.helper,
+            &[self.frame, self.memory, self.guards[&guard], value, options],
+        );
+        let status = self.builder.inst_results(call)[0];
+        let fault = self.builder.create_block();
+        let success = self.builder.create_block();
+        self.builder.ins().brif(status, fault, &[], success, &[]);
+        self.builder.switch_to_block(fault);
+        self.status(HELPER_FAILED);
+        self.builder.switch_to_block(success);
+        Ok(())
     }
 
     fn signed(&mut self, scalar: Scalar) -> Value {

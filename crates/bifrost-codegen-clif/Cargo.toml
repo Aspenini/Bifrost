@@ -9,6 +9,7 @@ publish = false
 [dependencies]
 bifrost-codegen.workspace = true
 bifrost-core.workspace = true
+bifrost-host.workspace = true
 bifrost-ir.workspace = true
 cranelift-codegen.workspace = true
 cranelift-frontend.workspace = true
@@ -19,5 +20,5 @@ bifrost-decoder-x86.workspace = true
 bifrost-lifter-x86.workspace = true
 bifrost-testkit.workspace = true
 
-[lints]
-workspace = true
+[lints.rust]
+unsafe_code = "deny"

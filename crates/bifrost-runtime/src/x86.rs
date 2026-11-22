@@ -1,15 +1,31 @@
 //! Bare x86-64 dispatch over caller-owned guest memory.
 
+#[cfg(feature = "interp")]
+use bifrost_core::GuestMemory;
 use bifrost_core::{
-    AccessKind, FaultClass, GuestFault, GuestIsa, GuestMemory, GuestThread, TraceEvent, TraceSink,
+    AccessKind, FaultClass, GuestFault, GuestIsa, GuestThread, TraceEvent, TraceSink,
 };
 use bifrost_decoder_x86::DecodeError;
+#[cfg(feature = "interp")]
 use bifrost_interpreter::{Interpreter, InterpreterError, StepOutcome};
-use bifrost_ir::{InstructionLifter, VerifyError};
+#[cfg(feature = "interp")]
+use bifrost_ir::InstructionLifter;
+use bifrost_ir::VerifyError;
 use bifrost_lifter_x86::{LiftError, X86Lifter};
 use std::fmt;
 
 pub use bifrost_executor::{ExecutionBudget, Executor, ExitReason};
+
+#[cfg(feature = "jit-cranelift")]
+mod jit;
+#[cfg(all(
+    feature = "jit-cranelift",
+    target_arch = "x86_64",
+    any(target_os = "linux", target_os = "windows")
+))]
+pub use jit::SystemJitMemory;
+#[cfg(feature = "jit-cranelift")]
+pub use jit::X86Jit;
 
 #[derive(Debug)]
 #[non_exhaustive]
@@ -17,7 +33,14 @@ pub enum ExecutionError {
     IsaMismatch(GuestIsa),
     Lift(LiftError),
     Verify(VerifyError),
+    #[cfg(feature = "interp")]
     Interpreter(InterpreterError),
+    #[cfg(feature = "jit-cranelift")]
+    Compile(bifrost_codegen_clif::CompileError),
+    #[cfg(feature = "jit-cranelift")]
+    Publish(std::io::Error),
+    #[cfg(feature = "jit-cranelift")]
+    Jit(bifrost_codegen_clif::ExecutionError),
     UnexpectedIrExit,
 }
 
@@ -30,7 +53,14 @@ impl fmt::Display for ExecutionError {
             ),
             Self::Lift(error) => error.fmt(f),
             Self::Verify(error) => error.fmt(f),
+            #[cfg(feature = "interp")]
             Self::Interpreter(error) => error.fmt(f),
+            #[cfg(feature = "jit-cranelift")]
+            Self::Compile(error) => error.fmt(f),
+            #[cfg(feature = "jit-cranelift")]
+            Self::Publish(error) => write!(f, "could not publish executable JIT code: {error}"),
+            #[cfg(feature = "jit-cranelift")]
+            Self::Jit(error) => error.fmt(f),
             Self::UnexpectedIrExit => {
                 f.write_str("single-instruction translation did not dispatch or fault")
             }
@@ -43,7 +73,14 @@ impl std::error::Error for ExecutionError {
         match self {
             Self::Lift(error) => Some(error),
             Self::Verify(error) => Some(error),
+            #[cfg(feature = "interp")]
             Self::Interpreter(error) => Some(error),
+            #[cfg(feature = "jit-cranelift")]
+            Self::Compile(error) => Some(error),
+            #[cfg(feature = "jit-cranelift")]
+            Self::Publish(error) => Some(error),
+            #[cfg(feature = "jit-cranelift")]
+            Self::Jit(error) => Some(error),
             _ => None,
         }
     }
@@ -51,11 +88,13 @@ impl std::error::Error for ExecutionError {
 
 /// Executes the documented scalar subset. Code is fetched fresh for every instruction.
 /// All branch and stack addresses belong to guest memory.
+#[cfg(feature = "interp")]
 pub struct X86Interpreter<'a> {
     memory: &'a mut dyn GuestMemory,
     trace: &'a mut dyn TraceSink,
 }
 
+#[cfg(feature = "interp")]
 impl<'a> X86Interpreter<'a> {
     /// Pass `&mut ()` to discard trace events.
     pub fn new(memory: &'a mut dyn GuestMemory, trace: &'a mut dyn TraceSink) -> Self {
@@ -63,7 +102,7 @@ impl<'a> X86Interpreter<'a> {
     }
 
     pub fn step(&mut self, thread: &mut GuestThread) -> Result<ExitReason, ExecutionError> {
-        self.check_isa(thread)?;
+        check_isa(thread)?;
         if let Some(fault) = thread.pending_fault {
             return Ok(ExitReason::Fault(fault));
         }
@@ -71,7 +110,7 @@ impl<'a> X86Interpreter<'a> {
         let pc = thread.cpu.pc();
         let lifted = match X86Lifter.lift_block(self.memory, pc, &Default::default()) {
             Ok(function) => function,
-            Err(error) => return self.lift_failure(thread, error),
+            Err(error) => return report_lift_failure(self.trace, thread, error),
         };
         let verified = lifted.verify().map_err(ExecutionError::Verify)?;
         let mut interpreter =
@@ -85,52 +124,53 @@ impl<'a> X86Interpreter<'a> {
             _ => Err(ExecutionError::UnexpectedIrExit),
         }
     }
-
-    fn check_isa(&self, thread: &GuestThread) -> Result<(), ExecutionError> {
-        let actual = thread.cpu.isa();
-        if actual != GuestIsa::X86_64 {
-            return Err(ExecutionError::IsaMismatch(actual));
-        }
-        Ok(())
-    }
-
-    fn lift_failure(
-        &mut self,
-        thread: &mut GuestThread,
-        error: LiftError,
-    ) -> Result<ExitReason, ExecutionError> {
-        let pc = thread.cpu.pc();
-        self.trace.record(TraceEvent::Step {
-            thread: thread.id,
-            pc,
-        });
-        let fault = match error {
-            LiftError::Decode(DecodeError::Fetch { source, .. }) => {
-                source.guest_fault(pc, thread.id, AccessKind::Execute)
-            }
-            LiftError::Decode(DecodeError::Invalid { .. }) => Some(GuestFault {
-                pc,
-                thread: thread.id,
-                class: FaultClass::IllegalInstruction,
-                memory_access: None,
-            }),
-            LiftError::Decode(DecodeError::NonCanonical { address, .. }) => Some(GuestFault {
-                pc,
-                thread: thread.id,
-                class: FaultClass::NonCanonicalAddress,
-                memory_access: Some((address, AccessKind::Execute)),
-            }),
-            _ => None,
-        };
-        let Some(fault) = fault else {
-            return Err(ExecutionError::Lift(error));
-        };
-        thread.pending_fault = Some(fault);
-        self.trace.record(TraceEvent::Fault(fault));
-        Ok(ExitReason::Fault(fault))
-    }
 }
 
+fn check_isa(thread: &GuestThread) -> Result<(), ExecutionError> {
+    let actual = thread.cpu.isa();
+    if actual != GuestIsa::X86_64 {
+        return Err(ExecutionError::IsaMismatch(actual));
+    }
+    Ok(())
+}
+
+fn report_lift_failure(
+    trace: &mut dyn TraceSink,
+    thread: &mut GuestThread,
+    error: LiftError,
+) -> Result<ExitReason, ExecutionError> {
+    let pc = thread.cpu.pc();
+    trace.record(TraceEvent::Step {
+        thread: thread.id,
+        pc,
+    });
+    let fault = match error {
+        LiftError::Decode(DecodeError::Fetch { source, .. }) => {
+            source.guest_fault(pc, thread.id, AccessKind::Execute)
+        }
+        LiftError::Decode(DecodeError::Invalid { .. }) => Some(GuestFault {
+            pc,
+            thread: thread.id,
+            class: FaultClass::IllegalInstruction,
+            memory_access: None,
+        }),
+        LiftError::Decode(DecodeError::NonCanonical { address, .. }) => Some(GuestFault {
+            pc,
+            thread: thread.id,
+            class: FaultClass::NonCanonicalAddress,
+            memory_access: Some((address, AccessKind::Execute)),
+        }),
+        _ => None,
+    };
+    let Some(fault) = fault else {
+        return Err(ExecutionError::Lift(error));
+    };
+    thread.pending_fault = Some(fault);
+    trace.record(TraceEvent::Fault(fault));
+    Ok(ExitReason::Fault(fault))
+}
+
+#[cfg(feature = "interp")]
 impl Executor for X86Interpreter<'_> {
     type Error = ExecutionError;
 
@@ -139,7 +179,7 @@ impl Executor for X86Interpreter<'_> {
         thread: &mut GuestThread,
         budget: ExecutionBudget,
     ) -> Result<ExitReason, Self::Error> {
-        self.check_isa(thread)?;
+        check_isa(thread)?;
         if let Some(fault) = thread.pending_fault {
             return Ok(ExitReason::Fault(fault));
         }

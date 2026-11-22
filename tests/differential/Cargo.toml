@@ -11,7 +11,7 @@ name = "native-x86"
 path = "native_x86.rs"
 
 [dev-dependencies]
-bifrost-runtime = { workspace = true, features = ["guest-x86_64", "interp"] }
+bifrost-runtime = { workspace = true, features = ["guest-x86_64", "interp", "jit-cranelift"] }
 bifrost-testkit.workspace = true
 
 [lints.rust]

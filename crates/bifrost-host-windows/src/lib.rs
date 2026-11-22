@@ -1,1 +1,5 @@
-//! Reserved crate boundary for the host-windows component. This milestone exposes no implementation here.
+//! Windows host services.
+
+#[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+#[allow(unsafe_code)]
+pub mod jit;

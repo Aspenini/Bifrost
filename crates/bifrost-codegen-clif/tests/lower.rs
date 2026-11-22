@@ -37,8 +37,20 @@ fn emits_machine_code_and_guest_pc_maps_for_scalar_fixtures() {
 }
 
 #[test]
-fn refuses_memory_ir_until_checked_helpers_are_available() {
-    let function = scalar_ir().verify().unwrap();
+fn refuses_wide_integers_outside_the_scalar_subset() {
+    let mut function = scalar_ir();
+    function.blocks[0].instructions.insert(
+        0,
+        bifrost_ir::Instruction {
+            pc: GuestAddress(0x1000),
+            op: bifrost_ir::Op::Const {
+                out: bifrost_ir::ValueId(1000),
+                ty: bifrost_ir::Type::I128,
+                bits: u128::MAX,
+            },
+        },
+    );
+    let function = function.verify().unwrap();
     let block = function.blocks().next().unwrap();
     assert!(matches!(
         Compiler::new()

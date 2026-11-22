@@ -1,5 +1,31 @@
-use crate::{AccessKind, FaultClass, GuestAddress, GuestFault, GuestThreadId};
+use crate::{AccessKind, FaultClass, GuestAddress, GuestFault, GuestIsa, GuestThreadId};
 use std::fmt;
+use std::num::NonZeroU8;
+
+/// Checks the span and alignment of an architectural data access before consulting page mappings.
+pub fn validate_guest_access(
+    isa: GuestIsa,
+    address: GuestAddress,
+    width: NonZeroU8,
+    alignment: NonZeroU8,
+) -> Result<(), (GuestAddress, FaultClass)> {
+    if isa == GuestIsa::X86_64 && !address.is_canonical_48() {
+        return Err((address, FaultClass::NonCanonicalAddress));
+    }
+    let last = address
+        .checked_add(u64::from(width.get() - 1))
+        .ok_or((address, FaultClass::AddressOverflow))?;
+    if isa == GuestIsa::X86_64 && !last.is_canonical_48() {
+        return Err((
+            GuestAddress(0x0000_8000_0000_0000),
+            FaultClass::NonCanonicalAddress,
+        ));
+    }
+    if !address.0.is_multiple_of(u64::from(alignment.get())) {
+        return Err((address, FaultClass::Alignment));
+    }
+    Ok(())
+}
 
 /// Reads and instruction fetches leave the output untouched on error.
 /// Implementations must enforce the corresponding permissions across the entire span.

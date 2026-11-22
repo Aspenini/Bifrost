@@ -1,6 +1,10 @@
 //! Cranelift machine code for verified Bifröst scalar blocks.
 
+#[allow(unsafe_code)]
+mod execute;
 mod lower;
+
+pub use execute::{BlockExit, ExecutionError, PublishedBlock};
 
 use bifrost_codegen::{CodegenBackend, CodegenOptions};
 use bifrost_core::{GuestAddress, GuestIsa, HostIsa, HostTarget};

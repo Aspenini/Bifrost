@@ -44,6 +44,7 @@ dependencies = [
  "bifrost-codegen",
  "bifrost-core",
  "bifrost-decoder-x86",
+ "bifrost-host",
  "bifrost-ir",
  "bifrost-lifter-x86",
  "bifrost-testkit",
@@ -114,6 +115,10 @@ dependencies = [
 [[package]]
 name = "bifrost-host-linux"
 version = "0.1.0"
+dependencies = [
+ "bifrost-host",
+ "libc",
+]
 
 [[package]]
 name = "bifrost-host-macos"
@@ -122,6 +127,10 @@ version = "0.1.0"
 [[package]]
 name = "bifrost-host-windows"
 version = "0.1.0"
+dependencies = [
+ "bifrost-host",
+ "windows-sys",
+]
 
 [[package]]
 name = "bifrost-interpreter"
@@ -194,11 +203,13 @@ version = "0.1.0"
 name = "bifrost-runtime"
 version = "0.1.0"
 dependencies = [
+ "bifrost-codegen",
  "bifrost-codegen-clif",
  "bifrost-core",
  "bifrost-decoder-arm64",
  "bifrost-decoder-x86",
  "bifrost-executor",
+ "bifrost-host",
  "bifrost-host-linux",
  "bifrost-host-windows",
  "bifrost-interpreter",
@@ -576,6 +587,21 @@ checksum = "f41d3b2cb9c3de7b696690af070d408b5e357011832f8b8bb7fbb315dbb620ed"
 dependencies = [
  "hashbrown 0.17.1",
  "libm",
+]
+
+[[package]]
+name = "windows-link"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5"
+
+[[package]]
+name = "windows-sys"
+version = "0.61.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ae137229bcbd6cdf0f7b80a31df61766145077ddf49416a728b02cb3921ff3fc"
+dependencies = [
+ "windows-link",
 ]
 
 [[package]]

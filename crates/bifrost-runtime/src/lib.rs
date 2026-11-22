@@ -1,8 +1,8 @@
 //! High-level capability discovery for the components selected by Cargo features.
 
 use bifrost_core::{
-    Capability, CapabilityProvider, CapabilityRegistry, ExecMode, GuestIsa, GuestOs, GuestTarget,
-    HostTarget, SupportLevel,
+    Capability, CapabilityProvider, CapabilityRegistry, ExecMode, ExecutableMemoryPolicy, GuestIsa,
+    GuestOs, GuestTarget, HostTarget, SupportLevel,
 };
 use std::fmt;
 
@@ -10,19 +10,63 @@ pub use bifrost_core as core;
 pub use bifrost_ir as ir;
 pub use bifrost_memory as memory;
 
-#[cfg(all(feature = "guest-x86_64", feature = "interp"))]
+#[cfg(all(
+    feature = "guest-x86_64",
+    any(feature = "interp", feature = "jit-cranelift")
+))]
 pub mod x86;
 
 const RAW_X86: bool = cfg!(all(feature = "guest-x86_64", feature = "interp"));
+const JIT_HOST: bool = cfg!(all(
+    feature = "jit-cranelift",
+    target_arch = "x86_64",
+    any(target_os = "linux", target_os = "windows")
+));
+
+fn probe_jit() -> bool {
+    #[cfg(all(
+        feature = "jit-cranelift",
+        target_arch = "x86_64",
+        any(target_os = "linux", target_os = "windows")
+    ))]
+    {
+        use bifrost_host::jit::JitMemoryManager;
+        #[cfg(target_os = "linux")]
+        use bifrost_host_linux::jit::LinuxJitMemory as SystemMemory;
+        #[cfg(target_os = "windows")]
+        use bifrost_host_windows::jit::WindowsJitMemory as SystemMemory;
+
+        bifrost_codegen_clif::Compiler::new().is_ok() && SystemMemory.publish(&[0xc3]).is_ok()
+    }
+    #[cfg(not(all(
+        feature = "jit-cranelift",
+        target_arch = "x86_64",
+        any(target_os = "linux", target_os = "windows")
+    )))]
+    {
+        false
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct RuntimeProfile {
     host: HostTarget,
+    jit_ready: bool,
     capabilities: CapabilityRegistry,
 }
 
 impl Default for RuntimeProfile {
     fn default() -> Self {
+        let jit_available = probe_jit();
+        let jit_ready = jit_available && cfg!(feature = "guest-x86_64");
+        let mut host = HostTarget::current();
+        if JIT_HOST {
+            host.executable_memory = if jit_available {
+                ExecutableMemoryPolicy::WriteThenExecute
+            } else {
+                ExecutableMemoryPolicy::Denied
+            };
+        }
         let mut capabilities = CapabilityRegistry::default();
         for (id, detail) in [
             (
@@ -57,12 +101,6 @@ impl Default for RuntimeProfile {
                 cfg!(feature = "interp"),
                 "bounded evaluation of verified scalar IR",
             ),
-            (
-                "raw-x86_64",
-                "enable guest-x86_64 and interp",
-                RAW_X86,
-                "bare x86-64 interpretation for the declared instruction subset",
-            ),
         ] {
             let record = if enabled {
                 Capability::implemented(id, true, SupportLevel::Partial, detail)
@@ -74,9 +112,38 @@ impl Default for RuntimeProfile {
                 .register(record)
                 .expect("unique optional capability");
         }
+        let raw = if RAW_X86 || cfg!(all(feature = "guest-x86_64", feature = "jit-cranelift")) {
+            Capability::implemented(
+                "raw-x86_64",
+                RAW_X86 || jit_ready,
+                SupportLevel::Partial,
+                "bare x86-64 execution for the declared instruction subset",
+            )
+            .expect("implemented support level")
+        } else {
+            Capability::planned(
+                "raw-x86_64",
+                false,
+                "enable guest-x86_64 and an execution backend",
+            )
+        };
+        capabilities
+            .register(raw)
+            .expect("unique raw execution capability");
+        let jit = if cfg!(feature = "jit-cranelift") {
+            Capability::implemented(
+                "jit-cranelift",
+                jit_available,
+                SupportLevel::Partial,
+                "scalar blocks with checked guest memory",
+            )
+            .expect("implemented support level")
+        } else {
+            Capability::planned("jit-cranelift", false, "enable jit-cranelift")
+        };
+        capabilities.register(jit).expect("unique JIT capability");
         for (id, compiled) in [
             ("decode-aarch64", cfg!(feature = "guest-aarch64")),
-            ("jit-cranelift", cfg!(feature = "jit-cranelift")),
             ("loader-elf", cfg!(feature = "loader-elf")),
             ("loader-pe", cfg!(feature = "loader-pe")),
             ("os-linux", cfg!(feature = "os-linux")),
@@ -96,7 +163,8 @@ impl Default for RuntimeProfile {
                 .expect("unique built-in capability");
         }
         Self {
-            host: HostTarget::current(),
+            host,
+            jit_ready,
             capabilities,
         }
     }
@@ -113,13 +181,26 @@ impl RuntimeProfile {
         guest: GuestTarget,
         mode: ExecMode,
     ) -> Result<(), UnsupportedExecutionMode> {
-        if RAW_X86
-            && guest.isa() == GuestIsa::X86_64
+        self.select_execution(guest, mode).map(|_| ())
+    }
+
+    /// Resolves Auto to an available backend for the bare scalar x86-64 profile.
+    pub fn select_execution(
+        &self,
+        guest: GuestTarget,
+        mode: ExecMode,
+    ) -> Result<ExecMode, UnsupportedExecutionMode> {
+        if guest.isa() == GuestIsa::X86_64
             && guest.os() == GuestOs::None
             && guest.features().iter().len() == 0
-            && matches!(mode, ExecMode::Auto | ExecMode::Interpreter)
         {
-            return Ok(());
+            match mode {
+                ExecMode::Auto | ExecMode::Jit if self.jit_ready => return Ok(ExecMode::Jit),
+                ExecMode::Auto | ExecMode::Interpreter if RAW_X86 => {
+                    return Ok(ExecMode::Interpreter);
+                }
+                _ => {}
+            }
         }
         Err(UnsupportedExecutionMode {
             mode,
@@ -175,7 +256,7 @@ mod tests {
                 .get("raw-x86_64")
                 .unwrap()
                 .host_available(),
-            RAW_X86
+            RAW_X86 || profile.jit_ready
         );
         assert!(
             profile
@@ -202,11 +283,13 @@ mod tests {
             ExecMode::Jit,
             ExecMode::Interpreter,
         ] {
-            let result = profile.validate_execution(guest.clone(), mode);
-            assert_eq!(
-                result.is_ok(),
-                RAW_X86 && matches!(mode, ExecMode::Auto | ExecMode::Interpreter)
-            );
+            let result = profile.select_execution(guest.clone(), mode).ok();
+            let expected = match mode {
+                ExecMode::Auto | ExecMode::Jit if profile.jit_ready => Some(ExecMode::Jit),
+                ExecMode::Auto | ExecMode::Interpreter if RAW_X86 => Some(ExecMode::Interpreter),
+                _ => None,
+            };
+            assert_eq!(result, expected);
         }
         let linux = GuestTarget::new(
             GuestIsa::X86_64,

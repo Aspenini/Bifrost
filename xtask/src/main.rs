@@ -58,6 +58,7 @@ fn allowed(package: &str) -> &'static [&'static str] {
         "bifrost-codegen" => &["bifrost-core", "bifrost-ir"],
         "bifrost-codegen-clif" => &[
             "bifrost-core",
+            "bifrost-host",
             "bifrost-ir",
             "bifrost-codegen",
             "bifrost-decoder-x86",
@@ -67,6 +68,8 @@ fn allowed(package: &str) -> &'static [&'static str] {
             "cranelift-frontend",
             "cranelift-native",
         ],
+        "bifrost-host-windows" => &["bifrost-host", "windows-sys"],
+        "bifrost-host-linux" => &["bifrost-host", "libc"],
         "bifrost-interpreter" => &[
             "bifrost-core",
             "bifrost-executor",
@@ -99,6 +102,8 @@ fn allowed(package: &str) -> &'static [&'static str] {
             "bifrost-interpreter",
             "bifrost-executor",
             "bifrost-codegen-clif",
+            "bifrost-codegen",
+            "bifrost-host",
             "bifrost-loader-elf",
             "bifrost-loader-pe",
             "bifrost-os-linux",

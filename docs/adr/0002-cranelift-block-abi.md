@@ -4,6 +4,8 @@
 
 The Cranelift backend compiles verified, single-instruction blocks for the baseline host ISA with the host's C calling convention. Machine code is returned as bytes with its guest span. Every host offset within that block maps to the same guest instruction. The backend rejects machine traps and unresolved relocations and limits the number of IR operations accepted per instruction.
 
-A generated entry receives an owned frame of 64-bit slots for general registers, flags, and exit data. It returns a status to its caller. Guest control flow exits to the dispatcher through this frame, including branches within executable guest pages. No guest address is used as a host code pointer.
+A generated entry receives a bounded frame of 64-bit slots for general registers, flags, and exit data. It also receives one checked memory callback and an opaque context for the guarded guest memory interface. The callback applies the interpreter's span and alignment rules before asking the guest memory implementation for bytes. A helper failure exits immediately and reports the guest instruction PC. A panic from a Rust memory implementation is caught in the helper and resumes at the Rust caller after the generated code returns.
 
-The first lowering milestone handles scalar operations and checks branch targets without guest memory access. Executable memory publication, checked guest-memory callbacks and interpreter equivalence tests follow in the execution milestone.
+The host adapters publish fresh writable, non-executable mappings as executable, read-only images. Windows flushes the instruction cache before exposing the image. Linux publication is currently limited to x86-64 with its coherent instruction cache. The dispatcher's entry wrapper calls only code emitted by Bifröst. Guest branch destinations and data addresses never become host pointers.
+
+The ABI currently covers x86-64 scalar blocks with at most 64-bit memory accesses and no unresolved internal edges or parameters. The remaining IR forms fail at compilation.

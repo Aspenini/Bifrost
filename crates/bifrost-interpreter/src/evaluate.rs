@@ -1,7 +1,6 @@
 use super::{InterpreterError, Local, Locals, data, guarded_address, value::Value};
 use bifrost_core::{
-    AccessKind, FaultClass, GuestAddress, GuestFault, GuestIsa, GuestMemory, GuestThread,
-    MemoryError,
+    AccessKind, FaultClass, GuestAddress, GuestFault, GuestMemory, GuestThread, MemoryError,
 };
 use bifrost_ir::{AddressConstraint, Endian, MemoryLayout, Op, Type};
 
@@ -139,32 +138,13 @@ fn check_access(
     kind: AccessKind,
     layout: MemoryLayout,
 ) -> Result<usize, EvalError> {
-    let width = layout.ty.storage_bytes().expect("verified memory type");
-    if thread.cpu.isa() == GuestIsa::X86_64 && !address.is_canonical_48() {
-        return Err(fault(
-            pc,
-            thread,
-            FaultClass::NonCanonicalAddress,
-            address,
-            kind,
-        ));
-    }
-    let last = address
-        .checked_add(u64::from(width - 1))
-        .ok_or_else(|| fault(pc, thread, FaultClass::AddressOverflow, address, kind))?;
-    if thread.cpu.isa() == GuestIsa::X86_64 && !last.is_canonical_48() {
-        return Err(fault(
-            pc,
-            thread,
-            FaultClass::NonCanonicalAddress,
-            GuestAddress(0x0000_8000_0000_0000),
-            kind,
-        ));
-    }
-    if !address.0.is_multiple_of(u64::from(layout.alignment)) {
-        return Err(fault(pc, thread, FaultClass::Alignment, address, kind));
-    }
-    Ok(usize::from(width))
+    let width = std::num::NonZeroU8::new(layout.ty.storage_bytes().expect("verified memory type"))
+        .expect("verified width is nonzero");
+    let alignment =
+        std::num::NonZeroU8::new(layout.alignment).expect("verified alignment is nonzero");
+    bifrost_core::validate_guest_access(thread.cpu.isa(), address, width, alignment)
+        .map_err(|(address, class)| fault(pc, thread, class, address, kind))?;
+    Ok(usize::from(width.get()))
 }
 
 fn memory_error(
