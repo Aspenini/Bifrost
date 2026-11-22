@@ -221,6 +221,10 @@ dependencies = [
 [[package]]
 name = "bifrost-loader-macho"
 version = "0.1.0"
+dependencies = [
+ "bifrost-core",
+ "bifrost-loader",
+]
 
 [[package]]
 name = "bifrost-loader-pe"
@@ -281,6 +285,7 @@ dependencies = [
  "bifrost-lifter-x86",
  "bifrost-loader",
  "bifrost-loader-elf",
+ "bifrost-loader-macho",
  "bifrost-loader-pe",
  "bifrost-memory",
  "bifrost-os-linux",

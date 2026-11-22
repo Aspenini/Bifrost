@@ -10,6 +10,7 @@ pub const MAX_IMAGE_BYTES: u64 = 64 * 1024 * 1024;
 pub enum Format {
     Elf,
     Pe,
+    MachO,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Metadata {

@@ -59,6 +59,7 @@ fn allowed(package: &str) -> &'static [&'static str] {
         "bifrost-loader" => &["bifrost-core", "bifrost-memory"],
         "bifrost-loader-elf" => &["bifrost-core", "bifrost-loader", "bifrost-memory"],
         "bifrost-loader-pe" => &["bifrost-core", "bifrost-loader", "bifrost-memory"],
+        "bifrost-loader-macho" => &["bifrost-core", "bifrost-loader"],
         "bifrost-os-linux" => &["bifrost-core", "bifrost-vfs", "bifrost-memory"],
         "bifrost-os-windows" => &["bifrost-abi", "bifrost-core", "bifrost-host-windows"],
         "bifrost-bridge" => &[
@@ -113,6 +114,7 @@ fn allowed(package: &str) -> &'static [&'static str] {
         | "bifrost-differential" => &["bifrost-runtime", "bifrost-testkit"],
         "bifrost-runtime" => &[
             "bifrost-loader",
+            "bifrost-loader-macho",
             "bifrost-abi",
             "bifrost-bridge",
             "bifrost-core",

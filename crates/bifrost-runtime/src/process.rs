@@ -82,6 +82,10 @@ impl From<ExecutionError> for RunError {
 }
 
 pub fn inspect(bytes: &[u8]) -> Result<Metadata, LoadError> {
+    #[cfg(feature = "macho-inspect")]
+    if bytes.starts_with(crate::macho::MAGIC) {
+        return crate::macho::inspect(bytes);
+    }
     #[cfg(feature = "linux-elf")]
     if bytes.starts_with(b"\x7fELF") {
         return Ok(bifrost_loader_elf::parse(bytes)?.image.metadata);

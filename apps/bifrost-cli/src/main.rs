@@ -160,7 +160,11 @@ fn run(args: &[OsString]) -> Result<u32, Error> {
     let argv: Vec<_> = guest_args.iter().map(|arg| arg.as_bytes()).collect();
     let image = read_file(Path::new(path))?;
     let (mut stdout, mut stderr) = (io::stdout().lock(), io::stderr().lock());
-    let status = if image.starts_with(b"MZ") {
+    let status = if image.starts_with(bifrost_runtime::macho::MAGIC) {
+        return Err(
+            "Mach-O support is limited to inspection; macOS guest execution is unavailable".into(),
+        );
+    } else if image.starts_with(b"MZ") {
         if mounted || argv.len() > 1 {
             return Err("PE execution currently accepts neither mounts nor guest arguments".into());
         }

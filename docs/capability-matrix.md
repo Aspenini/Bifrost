@@ -14,7 +14,7 @@
 | Native fast paths | Unavailable |
 | Linux ELF and syscall provider | Partial, static x86-64 images, initial stack, read-only mounts and core syscalls. Enable `linux-elf`. |
 | Windows PE and API provider | Partial, fixed-base x86-64 console images and named Win32/NT calls. Enable `windows-pe`. |
-| Mach-O loading | Unavailable |
+| Mach-O inspection | Experimental, thin little-endian x86-64 and ARM64 executables. See the [research scope](research.md). |
 | ABI bridge | Partial, four guest ABI descriptors with fixed signatures and synchronous callbacks. Enable `abi-bridge`. |
 | C ABI | Version 1 for portable ELF/PE execution. See the [C SDK](sdk.md). |
 | CLI | Text or JSON capability reporting, image inspection and bounded ELF/PE execution |
@@ -23,10 +23,10 @@
 | --- | --- | --- |
 | Windows x86-64 | Interpreter, JIT, native PE console writes | ELF and PE fixtures and C example |
 | Linux x86-64 | Interpreter, JIT, portable PE provider | ELF and PE fixtures and C example under WSL |
-| Linux ARM64 | Interpreter, JIT, portable PE provider | Raw executors previously tested under QEMU, with native CI configured |
+| Linux ARM64 | Interpreter, JIT, portable PE provider | Raw executors and direct ELF and PE CLI runs under QEMU, with native CI configured |
 | Windows ARM64 | Interpreter, JIT, native PE console writes | Cross-checked all targets and features, native CI configured |
 | macOS ARM64 | Interpreter and portable providers | Cross-checked all targets and features, native CI configured |
-| macOS x86-64 | Interpreter and portable providers | Native CI configured |
+| macOS x86-64 | Interpreter and portable providers | Cross-checked all targets and features, native CI configured |
 
 The process model has one guest thread per run. Linux exposes synthetic process and thread IDs. Guest thread creation, scheduling, signals and Windows exception delivery are outside this profile. macOS currently uses the interpreter. The C interface uses the interpreter on all hosts.
 

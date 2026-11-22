@@ -17,6 +17,7 @@ interp = ["dep:bifrost-interpreter", "dep:bifrost-executor"]
 jit-cranelift = ["dep:bifrost-codegen-clif", "dep:bifrost-codegen", "dep:bifrost-executor", "dep:bifrost-host", "dep:bifrost-host-linux", "dep:bifrost-host-windows"]
 loader-elf = ["dep:bifrost-loader-elf", "dep:bifrost-loader"]
 loader-pe = ["dep:bifrost-loader-pe", "dep:bifrost-loader"]
+macho-inspect = ["dep:bifrost-loader-macho"]
 os-linux = ["dep:bifrost-os-linux"]
 os-windows = ["dep:bifrost-os-windows"]
 host-windows = ["dep:bifrost-host-windows"]
@@ -40,6 +41,7 @@ bifrost-host = { workspace = true, optional = true }
 bifrost-loader-elf = { workspace = true, optional = true }
 bifrost-loader = { workspace = true, optional = true }
 bifrost-loader-pe = { workspace = true, optional = true }
+bifrost-loader-macho = { workspace = true, optional = true }
 bifrost-os-linux = { workspace = true, optional = true }
 bifrost-os-windows = { workspace = true, optional = true }
 bifrost-host-windows = { workspace = true, optional = true }

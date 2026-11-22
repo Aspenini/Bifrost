@@ -8,6 +8,8 @@ use std::fmt;
 
 pub use bifrost_core as core;
 pub use bifrost_ir as ir;
+#[cfg(feature = "macho-inspect")]
+pub use bifrost_loader_macho as macho;
 pub use bifrost_memory as memory;
 #[cfg(any(feature = "linux-elf", feature = "windows-pe"))]
 pub mod process;
@@ -252,6 +254,20 @@ impl Default for RuntimeProfile {
                 .register(Capability::planned(id, compiled, detail))
                 .expect("unique built-in capability");
         }
+        let macho = if cfg!(feature = "macho-inspect") {
+            Capability::implemented(
+                "macho-inspect",
+                true,
+                SupportLevel::Experimental,
+                "thin Mach-O executable metadata inspection",
+            )
+            .expect("implemented support")
+        } else {
+            Capability::planned("macho-inspect", false, "enable macho-inspect")
+        };
+        capabilities
+            .register(macho)
+            .expect("unique Mach-O capability");
         Self {
             host,
             jit_ready,
