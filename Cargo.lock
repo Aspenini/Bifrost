@@ -60,6 +60,9 @@ version = "0.1.0"
 [[package]]
 name = "bifrost-decoder-arm64"
 version = "0.1.0"
+dependencies = [
+ "bifrost-core",
+]
 
 [[package]]
 name = "bifrost-decoder-x86"
@@ -153,6 +156,11 @@ dependencies = [
 [[package]]
 name = "bifrost-lifter-arm64"
 version = "0.1.0"
+dependencies = [
+ "bifrost-core",
+ "bifrost-decoder-arm64",
+ "bifrost-ir",
+]
 
 [[package]]
 name = "bifrost-lifter-x86"

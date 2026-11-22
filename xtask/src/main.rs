@@ -77,6 +77,8 @@ fn allowed(package: &str) -> &'static [&'static str] {
             "bifrost-testkit",
         ],
         "bifrost-decoder-x86" => &["bifrost-core", "bifrost-memory", "iced-x86"],
+        "bifrost-decoder-arm64" => &["bifrost-core"],
+        "bifrost-lifter-arm64" => &["bifrost-core", "bifrost-decoder-arm64", "bifrost-ir"],
         "bifrost-lifter-x86" => &[
             "bifrost-core",
             "bifrost-decoder-x86",

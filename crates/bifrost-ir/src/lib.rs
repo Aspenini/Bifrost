@@ -204,6 +204,8 @@ pub struct MemoryLayout {
 #[non_exhaustive]
 pub enum Op {
     RequireFeature(CpuFeature),
+    /// Orders prior and subsequent guest data accesses in the serialized memory profile.
+    Fence,
     Const {
         out: ValueId,
         ty: Type,
@@ -241,6 +243,12 @@ pub enum Op {
     AddressToInt {
         out: ValueId,
         value: ValueId,
+    },
+    /// Truncates or zero-extends an integer to the target integer type.
+    IntCast {
+        out: ValueId,
+        value: ValueId,
+        ty: Type,
     },
     /// Checks an instruction target before committing effects, optionally only on a taken edge.
     CheckTarget {

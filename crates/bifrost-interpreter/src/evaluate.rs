@@ -18,6 +18,10 @@ pub(crate) fn instruction(
 ) -> Result<(), EvalError> {
     let (out, value) = match op {
         Op::RequireFeature(_) => return Ok(()),
+        Op::Fence => {
+            std::sync::atomic::fence(std::sync::atomic::Ordering::SeqCst);
+            return Ok(());
+        }
         Op::Const { out, ty, bits } => (out, Value::new(ty, bits)),
         Op::Int { out, op, lhs, rhs } => (out, data(locals, lhs).integer(op, data(locals, rhs))),
         Op::Compare {
@@ -54,6 +58,7 @@ pub(crate) fn instruction(
             Value::new(Type::GuestAddress, data(locals, value).bits),
         ),
         Op::AddressToInt { out, value } => (out, Value::new(Type::I64, data(locals, value).bits)),
+        Op::IntCast { out, value, ty } => (out, Value::new(ty, data(locals, value).bits)),
         Op::CheckTarget {
             address,
             when,

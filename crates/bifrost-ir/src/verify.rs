@@ -271,6 +271,7 @@ impl Values {
                 .ok_or(VerifyErrorKind::InvalidRegister(register))
         };
         let (out, ty) = match op {
+            Op::Fence => return Ok(()),
             Op::RequireFeature(feature) => {
                 return if target.features().contains(feature) {
                     Ok(())
@@ -318,6 +319,13 @@ impl Values {
             Op::AddressToInt { out, value } => {
                 self.expect(value, Type::GuestAddress)?;
                 (out, Type::I64)
+            }
+            Op::IntCast { out, value, ty } => {
+                self.integer(value)?;
+                if !ty.is_integer() {
+                    return Err(VerifyErrorKind::ExpectedInteger(out));
+                }
+                (out, ty)
             }
             Op::CheckTarget { address, when, .. } => {
                 self.expect(address, Type::GuestAddress)?;

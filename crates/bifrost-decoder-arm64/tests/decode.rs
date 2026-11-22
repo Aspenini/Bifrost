@@ -1,0 +1,69 @@
+use bifrost_core::GuestAddress as Addr;
+use bifrost_decoder_arm64::{DecodeError, Operand, Operation, Reg, decode};
+
+fn op(word: u32) -> Operation {
+    let decoded = decode(word.to_le_bytes(), Addr(0x1000)).unwrap();
+    assert_eq!(decoded.bytes(), word.to_le_bytes());
+    assert_eq!(decoded.next_pc(), Addr(0x1004));
+    decoded.operation()
+}
+
+#[test]
+fn distinguishes_sp_and_zero_and_sign_extends_branch_targets() {
+    assert_eq!(
+        op(0x9140_07ff),
+        Operation::Arithmetic {
+            dst: Reg::Sp,
+            lhs: Reg::Sp,
+            rhs: Operand::Immediate(4096),
+            sub: false,
+            flags: false
+        }
+    );
+    assert_eq!(
+        op(0xeb01_001f),
+        Operation::Arithmetic {
+            dst: Reg::Zero,
+            lhs: Reg::X(0),
+            rhs: Operand::Register(Reg::X(1)),
+            sub: true,
+            flags: true
+        }
+    );
+    assert_eq!(
+        op(0x17ff_ffff),
+        Operation::Branch {
+            target: Addr(0xffc),
+            link: false
+        }
+    );
+    assert_eq!(
+        op(0x54ff_ffe1),
+        Operation::BranchFlags {
+            target: Addr(0xffc),
+            condition: 1
+        }
+    );
+    assert_eq!(
+        op(0xf940_0420),
+        Operation::Memory {
+            reg: Reg::X(0),
+            base: Reg::X(1),
+            offset: 8,
+            load: true
+        }
+    );
+}
+
+#[test]
+fn rejects_other_forms_and_unaligned_fetches() {
+    assert_eq!(op(0x8b01_0400), Operation::Unsupported); // add x0,x0,x1,lsl #1
+    assert_eq!(op(0xf940_03e0), Operation::Unsupported); // ldr x0,[sp]
+    assert_eq!(op(0xd400_0001), Operation::Unsupported); // svc #0
+    assert_eq!(op(0x0000_1234), Operation::Undefined);
+    assert_eq!(op(0xd503_3bbf), Operation::Fence);
+    assert_eq!(
+        decode([0; 4], Addr(1)),
+        Err(DecodeError::Alignment(Addr(1)))
+    );
+}
