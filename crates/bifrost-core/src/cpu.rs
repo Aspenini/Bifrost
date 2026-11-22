@@ -2,6 +2,9 @@ use crate::{AbiId, GuestAddress, GuestFault, GuestIsa, GuestOs, GuestThreadId};
 use std::collections::BTreeSet;
 use std::fmt;
 
+mod snapshot;
+pub use snapshot::SnapshotError;
+
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[non_exhaustive]
 pub enum CpuFeature {

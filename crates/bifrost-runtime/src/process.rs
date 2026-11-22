@@ -1,8 +1,11 @@
 //! Bounded executable-image sessions.
-use crate::raw::{ExecutionError, ExitReason, RawInterpreter};
+use crate::{
+    RuntimeProfile,
+    raw::{ExecutionError, ExitReason, RawInterpreter},
+};
 use bifrost_core::{
     AbiId, CpuState, ExecMode, GuestFault, GuestIsa, GuestMemory, GuestOs, GuestTarget,
-    GuestThread, GuestThreadId, TraceEvent, TraceSink,
+    GuestThread, GuestThreadId, TraceEvent, TraceSink, X86State,
 };
 use bifrost_loader::LoadError;
 pub use bifrost_loader::{Format, Metadata};
@@ -10,6 +13,8 @@ pub use bifrost_loader::{Format, Metadata};
 pub use bifrost_os_linux::{Io, Vfs};
 #[cfg(feature = "linux-elf")]
 use bifrost_os_linux::{Linux, SyscallExit, UnsupportedSyscall};
+#[cfg(feature = "windows-pe")]
+use bifrost_os_windows::{ApiAction, RETURN_PC, STUB_BASE, Windows};
 #[cfg(feature = "windows-pe")]
 pub use bifrost_os_windows::{ApiPolicy, Io as WindowsIo};
 use std::fmt;
@@ -45,6 +50,7 @@ pub enum RunError {
     Mode(crate::UnsupportedExecutionMode),
     Fault(GuestFault),
     Budget,
+    AlreadyRun,
     Backend,
 }
 impl fmt::Display for RunError {
@@ -65,6 +71,7 @@ impl fmt::Display for RunError {
                 fault.thread.0, fault.class, fault.pc.0, fault.memory_access
             ),
             Self::Budget => f.write_str("guest instruction budget exhausted"),
+            Self::AlreadyRun => f.write_str("prepared guest process already ran"),
             Self::Backend => f.write_str("invalid process execution backend"),
         }
     }
@@ -122,41 +129,9 @@ pub fn run_windows_traced(
     options: RunOptions,
     trace: &mut dyn TraceSink,
 ) -> Result<u32, RunError> {
-    use bifrost_os_windows::{ApiAction, RETURN_PC, STUB_BASE, Windows};
-    let pe = bifrost_loader_pe::parse(bytes)?;
-    let targets = pe
-        .imports
-        .iter()
-        .map(|import| {
-            bifrost_os_windows::resolve(import.module, import.symbol).ok_or_else(|| {
-                RunError::Import {
-                    module: import.module.into(),
-                    symbol: import.symbol.into(),
-                }
-            })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let (mut memory, state) = pe.start(&targets, RETURN_PC)?;
-    memory
-        .map(
-            bifrost_core::GuestAddress(STUB_BASE),
-            bifrost_loader::PAGE,
-            bifrost_core::Protection::Guard,
-        )
-        .map_err(LoadError::from)?;
-    let mut windows = Windows::new(io, policy, &targets).map_err(RunError::Windows)?;
-    execute(&mut memory, state, options, trace, |thread, memory| {
-        Ok(
-            match windows
-                .dispatch(&mut thread.cpu, memory)
-                .map_err(RunError::Windows)?
-            {
-                ApiAction::Step => Action::Step,
-                ApiAction::Returned => Action::Continue,
-                ApiAction::Exit(status) => Action::Exit(status),
-            },
-        )
-    })
+    RuntimeProfile::default()
+        .prepare_windows(bytes, io, policy, options)?
+        .run(trace)
 }
 
 #[cfg(feature = "linux-elf")]
@@ -181,21 +156,192 @@ pub fn run_linux_traced<'a>(
     options: RunOptions,
     trace: &mut dyn TraceSink,
 ) -> Result<u32, RunError> {
-    let (mut memory, state) = bifrost_loader_elf::parse(bytes)?.start(args, environment)?;
-    let mut linux = Linux::new(io, vfs);
-    execute(&mut memory, state, options, trace, |thread, memory| {
-        let CpuState::X86_64(cpu) = &mut thread.cpu else {
-            return Err(RunError::Backend);
-        };
-        let mut opcode = [0; 2];
-        if memory.fetch(cpu.rip, &mut opcode).is_ok() && opcode == [0x0f, 0x05] {
-            return match linux.syscall(cpu, memory).map_err(RunError::Syscall)? {
-                SyscallExit::Continue => Ok(Action::Continue),
-                SyscallExit::Exit(status) => Ok(Action::Exit(status.into())),
-            };
+    RuntimeProfile::default()
+        .prepare_linux(bytes, args, environment, io, vfs, options)?
+        .run(trace)
+}
+
+impl RuntimeProfile {
+    /// Selects the backend and maps a static Linux image without executing guest code.
+    #[cfg(feature = "linux-elf")]
+    pub fn prepare_linux<'a>(
+        &self,
+        bytes: &[u8],
+        args: &[&[u8]],
+        environment: &[&[u8]],
+        io: Io<'a>,
+        vfs: &'a Vfs,
+        options: RunOptions,
+    ) -> Result<PreparedProcess<'a>, RunError> {
+        let elf = bifrost_loader_elf::parse(bytes)?;
+        let mode = self
+            .select_execution(bare_target(), options.execution)
+            .map_err(RunError::Mode)?;
+        let (memory, state) = elf.start(args, environment)?;
+        let services = Services::Linux(Linux::new(io, vfs));
+        Ok(PreparedProcess::new(
+            elf.image.metadata,
+            memory,
+            state,
+            services,
+            mode,
+            options.instruction_limit,
+        ))
+    }
+
+    /// Resolves all PE imports, selects the provider policy, and maps the image without running it.
+    #[cfg(feature = "windows-pe")]
+    pub fn prepare_windows<'a>(
+        &self,
+        bytes: &[u8],
+        io: WindowsIo<'a>,
+        policy: ApiPolicy,
+        options: RunOptions,
+    ) -> Result<PreparedProcess<'a>, RunError> {
+        let pe = bifrost_loader_pe::parse(bytes)?;
+        let targets = pe
+            .imports
+            .iter()
+            .map(|import| {
+                bifrost_os_windows::resolve(import.module, import.symbol).ok_or_else(|| {
+                    RunError::Import {
+                        module: import.module.into(),
+                        symbol: import.symbol.into(),
+                    }
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let mode = self
+            .select_execution(bare_target(), options.execution)
+            .map_err(RunError::Mode)?;
+        let services =
+            Services::Windows(Windows::new(io, policy, &targets).map_err(RunError::Windows)?);
+        let (mut memory, state) = pe.start(&targets, RETURN_PC)?;
+        memory
+            .map(
+                bifrost_core::GuestAddress(STUB_BASE),
+                bifrost_loader::PAGE,
+                bifrost_core::Protection::Guard,
+            )
+            .map_err(LoadError::from)?;
+        Ok(PreparedProcess::new(
+            pe.image.metadata,
+            memory,
+            state,
+            services,
+            mode,
+            options.instruction_limit,
+        ))
+    }
+}
+
+/// One executable session with owned guest state and borrowed host I/O.
+/// A session runs once. Its thread snapshot remains accessible at exit or on error.
+pub struct PreparedProcess<'a> {
+    metadata: Metadata,
+    memory: bifrost_memory::AddressSpace,
+    thread: GuestThread,
+    services: Services<'a>,
+    mode: ExecMode,
+    limit: u64,
+    started: bool,
+}
+
+impl<'a> PreparedProcess<'a> {
+    fn new(
+        metadata: Metadata,
+        memory: bifrost_memory::AddressSpace,
+        state: X86State,
+        services: Services<'a>,
+        mode: ExecMode,
+        limit: u64,
+    ) -> Self {
+        Self {
+            metadata,
+            memory,
+            services,
+            mode,
+            limit,
+            started: false,
+            thread: GuestThread {
+                id: GuestThreadId(1),
+                cpu: CpuState::X86_64(Box::new(state)),
+                pending_fault: None,
+            },
         }
-        Ok(Action::Step)
-    })
+    }
+
+    pub const fn metadata(&self) -> Metadata {
+        self.metadata
+    }
+
+    pub const fn execution(&self) -> ExecMode {
+        self.mode
+    }
+
+    pub const fn thread(&self) -> &GuestThread {
+        &self.thread
+    }
+
+    pub fn run(&mut self, trace: &mut dyn TraceSink) -> Result<u32, RunError> {
+        if std::mem::replace(&mut self.started, true) {
+            return Err(RunError::AlreadyRun);
+        }
+        let Self {
+            memory,
+            thread,
+            services,
+            mode,
+            limit,
+            ..
+        } = self;
+        execute(memory, thread, services, *mode, *limit, trace)
+    }
+}
+
+enum Services<'a> {
+    #[cfg(feature = "linux-elf")]
+    Linux(Linux<'a>),
+    #[cfg(feature = "windows-pe")]
+    Windows(Windows<'a>),
+}
+
+impl Services<'_> {
+    fn dispatch(
+        &mut self,
+        thread: &mut GuestThread,
+        memory: &mut dyn GuestMemory,
+    ) -> Result<Action, RunError> {
+        match self {
+            #[cfg(feature = "linux-elf")]
+            Self::Linux(linux) => {
+                let CpuState::X86_64(cpu) = &mut thread.cpu else {
+                    return Err(RunError::Backend);
+                };
+                let mut opcode = [0; 2];
+                if memory.fetch(cpu.rip, &mut opcode).is_err() || opcode != [0x0f, 0x05] {
+                    return Ok(Action::Step);
+                }
+                Ok(
+                    match linux.syscall(cpu, memory).map_err(RunError::Syscall)? {
+                        SyscallExit::Continue => Action::Continue,
+                        SyscallExit::Exit(status) => Action::Exit(status.into()),
+                    },
+                )
+            }
+            #[cfg(feature = "windows-pe")]
+            Self::Windows(windows) => Ok(
+                match windows
+                    .dispatch(&mut thread.cpu, memory)
+                    .map_err(RunError::Windows)?
+                {
+                    ApiAction::Step => Action::Step,
+                    ApiAction::Returned => Action::Continue,
+                    ApiAction::Exit(status) => Action::Exit(status),
+                },
+            ),
+        }
+    }
 }
 
 enum Action {
@@ -204,28 +350,25 @@ enum Action {
     Exit(u32),
 }
 
-fn execute(
-    memory: &mut bifrost_memory::AddressSpace,
-    state: bifrost_core::X86State,
-    options: RunOptions,
-    trace: &mut dyn TraceSink,
-    mut boundary: impl FnMut(&mut GuestThread, &mut dyn GuestMemory) -> Result<Action, RunError>,
-) -> Result<u32, RunError> {
-    let target = GuestTarget::new(
+fn bare_target() -> GuestTarget {
+    GuestTarget::new(
         GuestIsa::X86_64,
         GuestOs::None,
         AbiId::Bare,
         Default::default(),
     )
-    .expect("bare execution target");
-    let mode = crate::RuntimeProfile::default()
-        .select_execution(target.clone(), options.execution)
-        .map_err(RunError::Mode)?;
-    let mut thread = GuestThread {
-        id: GuestThreadId(1),
-        cpu: CpuState::X86_64(Box::new(state)),
-        pending_fault: None,
-    };
+    .expect("bare execution target")
+}
+
+fn execute(
+    memory: &mut bifrost_memory::AddressSpace,
+    thread: &mut GuestThread,
+    services: &mut Services<'_>,
+    mode: ExecMode,
+    limit: u64,
+    trace: &mut dyn TraceSink,
+) -> Result<u32, RunError> {
+    let target = bare_target();
     let mut engine = match mode {
         ExecMode::Interpreter => Engine::Interpreter(RawInterpreter::new(&target, memory, trace)?),
         #[cfg(all(
@@ -241,9 +384,9 @@ fn execute(
         )?)),
         _ => return Err(RunError::Backend),
     };
-    for _ in 0..options.instruction_limit {
+    for _ in 0..limit {
         let pc = thread.cpu.pc();
-        let action = boundary(&mut thread, engine.memory());
+        let action = services.dispatch(thread, engine.memory());
         if !matches!(&action, Ok(Action::Step)) {
             engine.trace().record(TraceEvent::Step {
                 thread: thread.id,
@@ -255,7 +398,7 @@ fn execute(
             Action::Continue => continue,
             Action::Step => {}
         }
-        match engine.step(&mut thread)? {
+        match engine.step(thread)? {
             ExitReason::Dispatch(_) => {}
             ExitReason::Fault(fault) => return Err(RunError::Fault(fault)),
             _ => return Err(RunError::Backend),

@@ -81,6 +81,9 @@ pub unsafe extern "C" fn bifrost_capability(
         if id == b"c-abi" || id == b"c-abi-raw" {
             return 1 | 2 | 4 | 8;
         }
+        if !cfg!(feature = "executable-images") && matches!(id, b"linux-elf" | b"windows-pe") {
+            return 1;
+        }
         let Some(item) = std::str::from_utf8(id)
             .ok()
             .and_then(|id| session.0.capabilities().get(id))
@@ -192,9 +195,12 @@ pub unsafe extern "C" fn bifrost_run(
 }
 
 /// Reports that executable image support was disabled in this build.
+///
+/// # Safety
+/// The session and buffer arguments follow the executable-image ABI contract.
 #[unsafe(no_mangle)]
 #[cfg(not(feature = "executable-images"))]
-pub extern "C" fn bifrost_run(
+pub unsafe extern "C" fn bifrost_run(
     _: *const Session,
     _: *const u8,
     _: usize,
