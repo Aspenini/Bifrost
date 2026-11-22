@@ -63,3 +63,27 @@ jobs:
           name: bifrost-${{ matrix.target }}
           path: target/sdk/bifrost-${{ matrix.target }}.tar.gz
           if-no-files-found: error
+
+  release-bundle:
+    if: github.event_name != 'pull_request'
+    needs: assemble
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bifrost-*
+          merge-multiple: true
+          path: target/sdk
+      - name: Require and hash all SDK archives
+        run: python scripts/package-sdk.py --checksums
+      - name: Verify release checksums
+        working-directory: target/sdk
+        run: sha256sum --check SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bifrost-sdk-release
+          path: |
+            target/sdk/bifrost-*.tar.gz
+            target/sdk/SHA256SUMS
+          if-no-files-found: error

@@ -23,7 +23,20 @@ clang -Wall -Wextra -Werror -I crates/bifrost-ffi/include examples/c-embed/main.
 ./target/debug/c-embed.exe tests/fixtures/linux/hello.elf
 ```
 
-The SDK workflow prepares downloadable archives on tagged commits and manual runs. It builds and tests each archive on its matching runner before upload.
+The SDK workflow builds and tests each archive on its matching runner. On a manual run or tag push, it also assembles the `bifrost-sdk-release` artifact after all six runners succeed.
+
+## Prepare a release
+
+Use a manual SDK workflow run to validate the release commit before tagging it. Push the version tag for that verified commit, then download `bifrost-sdk-release` from the tagged workflow run. The artifact contains all six native-tested SDK archives and a `SHA256SUMS` file.
+
+Verify the downloaded files from the artifact directory. Use the existing tag to stage a GitHub release draft for review.
+
+```sh
+sha256sum --check SHA256SUMS
+gh release create v0.1.0 --draft --verify-tag --generate-notes bifrost-*.tar.gz SHA256SUMS
+```
+
+Replace `v0.1.0` with the tag for the artifact you downloaded. Review the draft and its assets before publishing.
 
 ## Use an extracted SDK
 

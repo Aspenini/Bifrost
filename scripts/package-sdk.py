@@ -2,6 +2,7 @@
 
 import argparse
 import gzip
+import hashlib
 from pathlib import Path
 import tarfile
 import tempfile
@@ -66,14 +67,39 @@ def package(target, build, output):
     return destination
 
 
+def write_checksums(output):
+    names = [f"bifrost-{target}.tar.gz" for target in sorted(TARGETS)]
+    lines = []
+    for name in names:
+        with (output / name).open("rb") as archive:
+            digest = hashlib.file_digest(archive, "sha256").hexdigest()
+        lines.append(f"{digest}  {name}\n")
+
+    destination = output / "SHA256SUMS"
+    with tempfile.TemporaryDirectory(dir=output) as staging:
+        temporary = Path(staging) / destination.name
+        temporary.write_text("".join(lines), encoding="ascii", newline="\n")
+        temporary.replace(destination)
+    return destination
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("target", choices=sorted(TARGETS))
+    parser.add_argument("target", nargs="?", metavar="TARGET")
+    parser.add_argument("--checksums", action="store_true", help="require and hash all six SDK archives")
     parser.add_argument("--build-dir", type=Path, default=ROOT / "target/release")
     parser.add_argument("--output-dir", type=Path, default=ROOT / "target/sdk")
     args = parser.parse_args()
+    if args.checksums:
+        if args.target is not None:
+            parser.error("pass a target or --checksums")
+    elif args.target not in TARGETS:
+        parser.error(f"select a supported target: {', '.join(sorted(TARGETS))}")
     try:
-        print(package(args.target, args.build_dir, args.output_dir))
+        if args.checksums:
+            print(write_checksums(args.output_dir))
+        else:
+            print(package(args.target, args.build_dir, args.output_dir))
     except OSError as error:
         parser.exit(1, f"{parser.prog}: {error}\n")
 
