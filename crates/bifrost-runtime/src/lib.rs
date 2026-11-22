@@ -11,12 +11,28 @@ pub use bifrost_ir as ir;
 pub use bifrost_memory as memory;
 
 #[cfg(all(
+    any(feature = "guest-x86_64", feature = "guest-aarch64"),
+    any(feature = "interp", feature = "jit-cranelift")
+))]
+pub mod raw;
+
+#[cfg(all(
     feature = "guest-x86_64",
     any(feature = "interp", feature = "jit-cranelift")
 ))]
 pub mod x86;
 
-const RAW_X86: bool = cfg!(all(feature = "guest-x86_64", feature = "interp"));
+fn guest_compiled(isa: GuestIsa) -> bool {
+    (cfg!(feature = "guest-x86_64") && isa == GuestIsa::X86_64)
+        || (cfg!(feature = "guest-aarch64") && isa == GuestIsa::AArch64)
+}
+
+fn supports_raw_profile(target: &GuestTarget) -> bool {
+    guest_compiled(target.isa())
+        && target.os() == GuestOs::None
+        && target.features().iter().len() == 0
+}
+
 const JIT_HOST: bool = cfg!(all(
     feature = "jit-cranelift",
     any(
@@ -73,7 +89,7 @@ pub struct RuntimeProfile {
 impl Default for RuntimeProfile {
     fn default() -> Self {
         let jit_available = probe_jit();
-        let jit_ready = jit_available && cfg!(feature = "guest-x86_64");
+        let jit_ready = jit_available;
         let mut host = HostTarget::current();
         if JIT_HOST {
             host.executable_memory = if jit_available {
@@ -111,6 +127,18 @@ impl Default for RuntimeProfile {
                 "scalar arithmetic, flags, memory and direct control flow",
             ),
             (
+                "decode-aarch64",
+                "enable guest-aarch64",
+                cfg!(feature = "guest-aarch64"),
+                "fixed-width little-endian A64 scalar decoding",
+            ),
+            (
+                "lift-aarch64",
+                "enable guest-aarch64",
+                cfg!(feature = "guest-aarch64"),
+                "scalar arithmetic, NZCV, branches and ordered memory",
+            ),
+            (
                 "interpreter",
                 "enable interp",
                 cfg!(feature = "interp"),
@@ -127,24 +155,27 @@ impl Default for RuntimeProfile {
                 .register(record)
                 .expect("unique optional capability");
         }
-        let raw = if RAW_X86 || cfg!(all(feature = "guest-x86_64", feature = "jit-cranelift")) {
-            Capability::implemented(
-                "raw-x86_64",
-                RAW_X86 || jit_ready,
-                SupportLevel::Partial,
-                "bare x86-64 execution for the declared instruction subset",
-            )
-            .expect("implemented support level")
-        } else {
-            Capability::planned(
-                "raw-x86_64",
-                false,
-                "enable guest-x86_64 and an execution backend",
-            )
-        };
-        capabilities
-            .register(raw)
-            .expect("unique raw execution capability");
+        for (id, isa) in [
+            ("raw-x86_64", GuestIsa::X86_64),
+            ("raw-aarch64", GuestIsa::AArch64),
+        ] {
+            let raw = if guest_compiled(isa)
+                && cfg!(any(feature = "interp", feature = "jit-cranelift"))
+            {
+                Capability::implemented(
+                    id,
+                    cfg!(feature = "interp") || jit_ready,
+                    SupportLevel::Partial,
+                    "bare scalar guest execution",
+                )
+                .expect("implemented support level")
+            } else {
+                Capability::planned(id, false, "enable the guest and an execution backend")
+            };
+            capabilities
+                .register(raw)
+                .expect("unique raw execution capability");
+        }
         let jit = if cfg!(feature = "jit-cranelift") {
             Capability::implemented(
                 "jit-cranelift",
@@ -158,7 +189,6 @@ impl Default for RuntimeProfile {
         };
         capabilities.register(jit).expect("unique JIT capability");
         for (id, compiled) in [
-            ("decode-aarch64", cfg!(feature = "guest-aarch64")),
             ("loader-elf", cfg!(feature = "loader-elf")),
             ("loader-pe", cfg!(feature = "loader-pe")),
             ("os-linux", cfg!(feature = "os-linux")),
@@ -199,19 +229,16 @@ impl RuntimeProfile {
         self.select_execution(guest, mode).map(|_| ())
     }
 
-    /// Resolves Auto to an available backend for the bare scalar x86-64 profile.
+    /// Resolves Auto to an available backend for either bare scalar guest profile.
     pub fn select_execution(
         &self,
         guest: GuestTarget,
         mode: ExecMode,
     ) -> Result<ExecMode, UnsupportedExecutionMode> {
-        if guest.isa() == GuestIsa::X86_64
-            && guest.os() == GuestOs::None
-            && guest.features().iter().len() == 0
-        {
+        if supports_raw_profile(&guest) {
             match mode {
                 ExecMode::Auto | ExecMode::Jit if self.jit_ready => return Ok(ExecMode::Jit),
-                ExecMode::Auto | ExecMode::Interpreter if RAW_X86 => {
+                ExecMode::Auto | ExecMode::Interpreter if cfg!(feature = "interp") => {
                     return Ok(ExecMode::Interpreter);
                 }
                 _ => {}
@@ -265,14 +292,16 @@ mod tests {
         let interp = profile.capabilities().get("interpreter").unwrap();
         assert_eq!(interp.compiled(), cfg!(feature = "interp"));
         assert_eq!(interp.host_available(), cfg!(feature = "interp"));
-        assert_eq!(
-            profile
-                .capabilities()
-                .get("raw-x86_64")
-                .unwrap()
-                .host_available(),
-            RAW_X86 || profile.jit_ready
-        );
+        for (id, isa) in [
+            ("raw-x86_64", GuestIsa::X86_64),
+            ("raw-aarch64", GuestIsa::AArch64),
+        ] {
+            let available = profile.capabilities().get(id).unwrap().host_available();
+            assert_eq!(
+                available,
+                guest_compiled(isa) && (cfg!(feature = "interp") || profile.jit_ready)
+            );
+        }
         assert!(
             profile
                 .capabilities()
@@ -300,8 +329,16 @@ mod tests {
         ] {
             let result = profile.select_execution(guest.clone(), mode).ok();
             let expected = match mode {
-                ExecMode::Auto | ExecMode::Jit if profile.jit_ready => Some(ExecMode::Jit),
-                ExecMode::Auto | ExecMode::Interpreter if RAW_X86 => Some(ExecMode::Interpreter),
+                ExecMode::Auto | ExecMode::Jit
+                    if profile.jit_ready && guest_compiled(guest.isa()) =>
+                {
+                    Some(ExecMode::Jit)
+                }
+                ExecMode::Auto | ExecMode::Interpreter
+                    if cfg!(feature = "interp") && guest_compiled(guest.isa()) =>
+                {
+                    Some(ExecMode::Interpreter)
+                }
                 _ => None,
             };
             assert_eq!(result, expected);

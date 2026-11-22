@@ -1,5 +1,6 @@
 //! Self-authored deterministic fixtures shared by Bifröst examples and tests.
 
+pub mod arm64;
 pub mod x86;
 
 use bifrost_core::{AbiId, GuestAddress, GuestIsa, GuestOs, GuestTarget};

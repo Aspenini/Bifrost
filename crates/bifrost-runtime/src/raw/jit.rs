@@ -1,12 +1,10 @@
-use super::{ExecutionError, check_isa, report_lift_failure};
+use super::{ExecutionError, check_isa, lift, report_lift_failure, run_steps, validate};
 use bifrost_codegen::{CodegenBackend, CodegenOptions};
 use bifrost_codegen_clif::{BlockExit, Compiler, MachineCode, PublishedBlock};
-use bifrost_core::{GuestAddress, GuestThread, TraceEvent, TraceSink};
-use bifrost_decoder_x86::MAX_INSTRUCTION_BYTES;
+use bifrost_core::{GuestAddress, GuestIsa, GuestTarget, GuestThread, TraceEvent, TraceSink};
 use bifrost_executor::{ExecutionBudget, Executor, ExitReason};
 use bifrost_host::jit::JitMemoryManager;
-use bifrost_ir::{CodeSpan, InstructionLifter};
-use bifrost_lifter_x86::X86Lifter;
+use bifrost_ir::CodeSpan;
 use bifrost_memory::{AddressSpace, AddressSpaceId};
 use std::collections::BTreeMap;
 
@@ -19,6 +17,7 @@ pub use bifrost_host_linux::jit::LinuxJitMemory as SystemJitMemory;
 pub use bifrost_host_windows::jit::WindowsJitMemory as SystemJitMemory;
 
 const DEFAULT_CACHE_CAPACITY: usize = 256;
+const MAX_INSTRUCTION_BYTES: usize = 15;
 
 struct CachedBlock<Image> {
     span: CodeSpan,
@@ -49,7 +48,8 @@ fn code_generations(memory: &AddressSpace, span: CodeSpan) -> Option<[u64; MAX_I
 }
 
 /// A Cranelift executor for one caller-owned guest address space.
-pub struct X86Jit<'a, M: JitMemoryManager> {
+pub struct RawJit<'a, M: JitMemoryManager> {
+    isa: GuestIsa,
     compiler: Compiler,
     memory: &'a mut AddressSpace,
     trace: &'a mut dyn TraceSink,
@@ -61,14 +61,25 @@ pub struct X86Jit<'a, M: JitMemoryManager> {
     misses: u64,
 }
 
-impl<'a, M: JitMemoryManager> X86Jit<'a, M> {
+impl<'a, M: JitMemoryManager> RawJit<'a, M> {
     pub fn new(
+        target: &GuestTarget,
+        memory: &'a mut AddressSpace,
+        trace: &'a mut dyn TraceSink,
+        manager: M,
+    ) -> Result<Self, ExecutionError> {
+        Self::for_isa(validate(target)?, memory, trace, manager)
+    }
+
+    pub(crate) fn for_isa(
+        isa: GuestIsa,
         memory: &'a mut AddressSpace,
         trace: &'a mut dyn TraceSink,
         manager: M,
     ) -> Result<Self, ExecutionError> {
         let cache_owner = memory.id();
         Ok(Self {
+            isa,
             compiler: Compiler::new().map_err(ExecutionError::Compile)?,
             memory,
             trace,
@@ -102,7 +113,7 @@ impl<'a, M: JitMemoryManager> X86Jit<'a, M> {
     }
 
     pub fn step(&mut self, thread: &mut GuestThread) -> Result<ExitReason, ExecutionError> {
-        check_isa(thread)?;
+        check_isa(self.isa, thread)?;
         if let Some(fault) = thread.pending_fault {
             return Ok(ExitReason::Fault(fault));
         }
@@ -121,7 +132,12 @@ impl<'a, M: JitMemoryManager> X86Jit<'a, M> {
             self.misses = self.misses.saturating_add(1);
             let code = match self.compile(pc) {
                 Ok(code) => code,
-                Err(ExecutionError::Lift(error)) => {
+                #[cfg(feature = "guest-x86_64")]
+                Err(error @ ExecutionError::Lift(_)) => {
+                    return report_lift_failure(self.trace, thread, error);
+                }
+                #[cfg(feature = "guest-aarch64")]
+                Err(error @ ExecutionError::Arm64Lift(_)) => {
                     return report_lift_failure(self.trace, thread, error);
                 }
                 Err(error) => return Err(error),
@@ -171,9 +187,7 @@ impl<'a, M: JitMemoryManager> X86Jit<'a, M> {
     }
 
     fn compile(&mut self, pc: GuestAddress) -> Result<MachineCode, ExecutionError> {
-        let function = X86Lifter
-            .lift_block(self.memory, pc, &Default::default())
-            .map_err(ExecutionError::Lift)?;
+        let function = lift(self.isa, self.memory, pc)?;
         let verified = function.verify().map_err(ExecutionError::Verify)?;
         let block = verified
             .blocks()
@@ -185,7 +199,7 @@ impl<'a, M: JitMemoryManager> X86Jit<'a, M> {
     }
 }
 
-impl<M: JitMemoryManager> Executor for X86Jit<'_, M> {
+impl<M: JitMemoryManager> Executor for RawJit<'_, M> {
     type Error = ExecutionError;
 
     fn run(
@@ -193,16 +207,6 @@ impl<M: JitMemoryManager> Executor for X86Jit<'_, M> {
         thread: &mut GuestThread,
         budget: ExecutionBudget,
     ) -> Result<ExitReason, Self::Error> {
-        check_isa(thread)?;
-        if let Some(fault) = thread.pending_fault {
-            return Ok(ExitReason::Fault(fault));
-        }
-        for _ in 0..budget.instructions {
-            match self.step(thread)? {
-                ExitReason::Dispatch(_) => {}
-                reason => return Ok(reason),
-            }
-        }
-        Ok(ExitReason::BudgetExhausted)
+        run_steps(self.isa, thread, budget, |thread| self.step(thread))
     }
 }

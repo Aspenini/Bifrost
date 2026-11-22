@@ -1,6 +1,6 @@
 use crate::{MachineCode, lower};
 use bifrost_core::{
-    AccessKind, CpuState, FaultClass, GuestAddress, GuestFault, GuestMemory, GuestThread,
+    AccessKind, CpuState, FaultClass, GuestAddress, GuestFault, GuestIsa, GuestMemory, GuestThread,
     GuestThreadId, MemoryError,
 };
 use bifrost_host::jit::{ExecutableImage, JitMemoryManager};
@@ -16,7 +16,7 @@ use std::{
 
 #[repr(C)]
 struct Frame {
-    general: [u64; 16],
+    general: [u64; 32],
     flags: u64,
     next_pc: u64,
     detail: u64,
@@ -36,6 +36,7 @@ type Entry = unsafe extern "C" fn(*mut Frame, *mut c_void, Helper) -> u32;
 pub struct PublishedBlock<Image> {
     image: Image,
     guest: CodeSpan,
+    guest_isa: GuestIsa,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -59,7 +60,7 @@ pub enum ExecutionError {
 impl fmt::Display for ExecutionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::WrongGuestIsa => f.write_str("JIT block expects x86-64 guest state"),
+            Self::WrongGuestIsa => f.write_str("guest ISA does not match the compiled block"),
             Self::WrongGuestPc { expected, actual } => write!(
                 f,
                 "JIT block at {:#x} cannot run at {:#x}",
@@ -87,6 +88,7 @@ impl MachineCode {
         Ok(PublishedBlock {
             image: manager.publish(&self.bytes)?,
             guest: self.guest,
+            guest_isa: self.guest_isa,
         })
     }
 }
@@ -98,13 +100,13 @@ impl<Image: ExecutableImage> PublishedBlock<Image> {
         thread: &mut GuestThread,
         memory: &mut dyn GuestMemory,
     ) -> Result<BlockExit, ExecutionError> {
-        let CpuState::X86_64(state) = &mut thread.cpu else {
+        if thread.cpu.isa() != self.guest_isa {
             return Err(ExecutionError::WrongGuestIsa);
-        };
+        }
         if let Some(fault) = thread.pending_fault {
             return Ok(BlockExit::Fault(fault));
         }
-        let pc = state.rip;
+        let pc = thread.cpu.pc();
         if pc != self.guest.start {
             return Err(ExecutionError::WrongGuestPc {
                 expected: self.guest.start,
@@ -112,14 +114,27 @@ impl<Image: ExecutableImage> PublishedBlock<Image> {
             });
         }
         let mut frame = Frame {
-            general: state.gpr,
-            flags: state.rflags,
+            general: [0; 32],
+            flags: 0,
             next_pc: pc.0,
             detail: 0,
             helper_value: 0,
         };
+        match &thread.cpu {
+            CpuState::X86_64(state) => {
+                frame.general[..16].copy_from_slice(&state.gpr);
+                frame.flags = state.rflags;
+            }
+            CpuState::AArch64(state) => {
+                frame.general[..31].copy_from_slice(&state.x);
+                frame.general[31] = state.sp.0;
+                frame.flags = u64::from(state.nzcv);
+            }
+            _ => return Err(ExecutionError::WrongGuestIsa),
+        }
         let mut context = MemoryContext {
             memory,
+            isa: self.guest_isa,
             pc,
             thread: thread.id,
             failure: None,
@@ -135,12 +150,23 @@ impl<Image: ExecutableImage> PublishedBlock<Image> {
                 access_memory,
             )
         };
-        state.gpr = frame.general;
-        state.rflags = frame.flags;
+        match &mut thread.cpu {
+            CpuState::X86_64(state) => {
+                state.gpr.copy_from_slice(&frame.general[..16]);
+                state.rflags = frame.flags;
+            }
+            CpuState::AArch64(state) => {
+                state.x.copy_from_slice(&frame.general[..31]);
+                state.sp = GuestAddress(frame.general[31]);
+                state.nzcv = frame.flags as u32;
+            }
+            _ => return Err(ExecutionError::WrongGuestIsa),
+        }
         let (class, access) = match i64::from(status) {
             lower::DISPATCH => {
-                state.rip = GuestAddress(frame.next_pc);
-                return Ok(BlockExit::Dispatch(state.rip));
+                let next = GuestAddress(frame.next_pc);
+                thread.cpu.set_pc(next);
+                return Ok(BlockExit::Dispatch(next));
             }
             lower::NONCANONICAL => (
                 FaultClass::NonCanonicalAddress,
@@ -169,6 +195,7 @@ impl<Image: ExecutableImage> PublishedBlock<Image> {
 
 struct MemoryContext<'a> {
     memory: &'a mut dyn GuestMemory,
+    isa: GuestIsa,
     pc: GuestAddress,
     thread: GuestThreadId,
     failure: Option<HelperError>,
@@ -226,20 +253,16 @@ impl MemoryContext<'_> {
         } else {
             AccessKind::Read
         };
-        bifrost_core::validate_guest_access(
-            bifrost_core::GuestIsa::X86_64,
-            address,
-            width,
-            alignment,
-        )
-        .map_err(|(address, class)| {
-            HelperError::Guest(GuestFault {
-                pc: self.pc,
-                thread: self.thread,
-                class,
-                memory_access: Some((address, access)),
-            })
-        })?;
+        bifrost_core::validate_guest_access(self.isa, address, width, alignment).map_err(
+            |(address, class)| {
+                HelperError::Guest(GuestFault {
+                    pc: self.pc,
+                    thread: self.thread,
+                    class,
+                    memory_access: Some((address, access)),
+                })
+            },
+        )?;
 
         let width = usize::from(width.get());
         let start = if big_endian { 8 - width } else { 0 };

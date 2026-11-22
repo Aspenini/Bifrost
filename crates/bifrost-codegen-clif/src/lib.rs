@@ -20,6 +20,7 @@ const MAX_OPERATIONS: usize = 256;
 pub struct MachineCode {
     bytes: Vec<u8>,
     guest: CodeSpan,
+    guest_isa: GuestIsa,
 }
 
 impl MachineCode {
@@ -56,7 +57,7 @@ impl fmt::Display for CompileError {
         match self {
             Self::Host(message) => write!(f, "Cranelift host unavailable: {message}"),
             Self::UnsupportedBlock => {
-                f.write_str("expected a single bounded x86-64 instruction without block parameters")
+                f.write_str("expected a single bounded scalar instruction without block parameters")
             }
             Self::UnsupportedOperation { pc, operation } => {
                 write!(f, "cannot lower {operation} at guest PC {:#x}", pc.0)
@@ -101,7 +102,7 @@ impl CodegenBackend for Compiler {
     ) -> Result<MachineCode, CompileError> {
         let isa = block.target().isa();
         let block = block.as_ref();
-        if isa != GuestIsa::X86_64
+        if !matches!(isa, GuestIsa::X86_64 | GuestIsa::AArch64)
             || !block.parameters.is_empty()
             || block.span.start != block.exit_pc
             || block.instructions.len() > MAX_OPERATIONS
@@ -127,6 +128,7 @@ impl CodegenBackend for Compiler {
         Ok(MachineCode {
             bytes: code.code_buffer().to_vec(),
             guest: block.span,
+            guest_isa: isa,
         })
     }
 }
