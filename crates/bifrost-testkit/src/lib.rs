@@ -1,5 +1,7 @@
 //! Self-authored deterministic fixtures shared by Bifröst examples and tests.
 
+pub mod x86;
+
 use bifrost_core::{AbiId, GuestAddress, GuestIsa, GuestOs, GuestTarget};
 use bifrost_ir::*;
 use bifrost_memory::{AddressSpace, GuestMemory, MemoryError, Protection};
