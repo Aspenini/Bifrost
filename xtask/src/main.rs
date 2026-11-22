@@ -8,7 +8,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     let output = Command::new(cargo)
         .args([
             "tree",
-            "--offline",
             "--locked",
             "--workspace",
             "--all-features",

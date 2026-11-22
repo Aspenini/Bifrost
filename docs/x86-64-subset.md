@@ -17,4 +17,4 @@ ADD, SUB, and CMP set CF, PF, AF, ZF, SF, and OF. PF is the even parity of the r
 
 The deterministic fixture vectors live in `bifrost-testkit`. They record the machine bytes, initial register values, and expected effects independently of the decoder and lifter.
 
-The differential tests run fixed native assembly on x86-64 hosts. They compare 4,860 arithmetic cases across the accepted register and immediate encodings and 468 conditional branch cases across short and near forms. Other cases compare register and memory results, RIP-relative addressing, jumps, and CALL/RET stack state. The ordinary Rust fixtures check guest faults, including UD2, without raising host exceptions.
+The differential tests use fixed native assembly on x86-64 hosts. On Windows and Linux, they compare the interpreter and JIT for 4,860 arithmetic cases and 468 conditional branch cases, plus memory, RIP-relative addressing, jumps and CALL/RET stack fixtures. Guest-fault fixtures compare interpreter and JIT state and trace PCs, including UD2, protection and unmapped accesses.

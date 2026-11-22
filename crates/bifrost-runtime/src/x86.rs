@@ -11,7 +11,9 @@ use bifrost_interpreter::{Interpreter, InterpreterError, StepOutcome};
 #[cfg(feature = "interp")]
 use bifrost_ir::InstructionLifter;
 use bifrost_ir::VerifyError;
-use bifrost_lifter_x86::{LiftError, X86Lifter};
+use bifrost_lifter_x86::LiftError;
+#[cfg(feature = "interp")]
+use bifrost_lifter_x86::X86Lifter;
 use std::fmt;
 
 pub use bifrost_executor::{ExecutionBudget, Executor, ExitReason};
@@ -25,7 +27,7 @@ mod jit;
 ))]
 pub use jit::SystemJitMemory;
 #[cfg(feature = "jit-cranelift")]
-pub use jit::X86Jit;
+pub use jit::{CacheStats, X86Jit};
 
 #[derive(Debug)]
 #[non_exhaustive]

@@ -3,6 +3,13 @@
 use bifrost_core::{AccessKind, GuestAddress};
 pub use bifrost_core::{GuestMemory, GuestMemoryRead, MemoryError, Protection};
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static NEXT_ADDRESS_SPACE: AtomicU64 = AtomicU64::new(1);
+
+/// Identifies a guest address space for the lifetime of the host process.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct AddressSpaceId(u64);
 
 const fn permits(protection: Protection, access: AccessKind) -> bool {
     matches!(
@@ -42,6 +49,7 @@ struct Page {
 /// # Ok::<(), bifrost_memory::MemoryError>(())
 /// ```
 pub struct AddressSpace {
+    id: AddressSpaceId,
     page_size: usize,
     max_pages: usize,
     pages: BTreeMap<u64, Page>,
@@ -53,7 +61,14 @@ impl AddressSpace {
         if !page_size.is_power_of_two() {
             return Err(MemoryError::InvalidPageSize(page_size));
         }
+        let id = NEXT_ADDRESS_SPACE
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+                value.checked_add(1)
+            })
+            .map(AddressSpaceId)
+            .map_err(|_| MemoryError::AddressSpaceIdentityExhausted)?;
         Ok(Self {
+            id,
             page_size,
             max_pages,
             pages: BTreeMap::new(),
@@ -63,6 +78,10 @@ impl AddressSpace {
 
     pub const fn page_size(&self) -> usize {
         self.page_size
+    }
+
+    pub const fn id(&self) -> AddressSpaceId {
+        self.id
     }
 
     /// Returns the current page generation. Unmapping and remapping changes the generation.

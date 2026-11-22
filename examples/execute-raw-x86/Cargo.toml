@@ -6,6 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+[features]
+jit-cranelift = ["bifrost-runtime/jit-cranelift"]
+
 [dependencies]
 bifrost-runtime = { workspace = true, features = ["guest-x86_64", "interp"] }
 bifrost-testkit.workspace = true

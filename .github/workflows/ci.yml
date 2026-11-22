@@ -28,4 +28,5 @@ jobs:
       - run: cargo run --locked -p xtask -- check-deps
       - run: cargo run --locked -p bifrost-example-verify-ir
       - run: cargo run --locked -p bifrost-example-execute-raw-x86
+      - run: cargo run --locked -p bifrost-example-execute-raw-x86 --features jit-cranelift
       - run: cargo run --locked -p bifrost-cli -- capabilities

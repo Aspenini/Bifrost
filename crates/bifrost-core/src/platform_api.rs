@@ -69,6 +69,7 @@ pub enum MemoryError {
     PageLimit,
     Allocation,
     GenerationExhausted,
+    AddressSpaceIdentityExhausted,
 }
 
 impl fmt::Display for MemoryError {
@@ -95,6 +96,9 @@ impl fmt::Display for MemoryError {
             Self::PageLimit => f.write_str("guest page limit exceeded"),
             Self::Allocation => f.write_str("could not allocate guest memory"),
             Self::GenerationExhausted => f.write_str("guest page generations exhausted"),
+            Self::AddressSpaceIdentityExhausted => {
+                f.write_str("guest address-space identities exhausted")
+            }
         }
     }
 }
