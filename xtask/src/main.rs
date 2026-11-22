@@ -83,6 +83,7 @@ fn allowed(package: &str) -> &'static [&'static str] {
         ],
         "bifrost-host-windows" => &["bifrost-host", "windows-sys"],
         "bifrost-host-linux" => &["bifrost-host", "libc"],
+        "bifrost-host-macos" => &["libc"],
         "bifrost-interpreter" => &[
             "bifrost-core",
             "bifrost-executor",
@@ -115,6 +116,7 @@ fn allowed(package: &str) -> &'static [&'static str] {
         "bifrost-runtime" => &[
             "bifrost-loader",
             "bifrost-loader-macho",
+            "bifrost-host-macos",
             "bifrost-abi",
             "bifrost-bridge",
             "bifrost-core",

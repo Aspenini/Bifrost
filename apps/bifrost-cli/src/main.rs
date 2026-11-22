@@ -1,8 +1,9 @@
 use bifrost_runtime::{
     RuntimeProfile,
-    core::{CapabilityProvider, ExecMode},
+    core::{CapabilityProvider, ExecMode, TraceSink},
     process::{self, ApiPolicy, Io, RunOptions, Vfs, WindowsIo},
 };
+mod trace;
 use std::{
     ffi::OsString,
     fs::File,
@@ -10,7 +11,7 @@ use std::{
     path::Path,
 };
 
-const USAGE: &str = "Usage: bifrost capabilities [--json] | inspect FILE | run [--exec auto|interp|jit] [--api auto|portable|native] [--max-steps N] [--mount /guest=HOST] FILE [-- ARGS...]";
+const USAGE: &str = "Usage: bifrost doctor | version [--verbose] | capabilities [--json] | inspect FILE | trace FILE --output FILE | run [--exec auto|interp|jit] [--api auto|portable|native] [--max-steps N] [--mount /guest=HOST] FILE [-- ARGS...]";
 const MAX_FILE: u64 = 64 * 1024 * 1024;
 type Error = Box<dyn std::error::Error>;
 
@@ -29,6 +30,9 @@ fn command(args: Vec<OsString>) -> Result<u32, Error> {
         [] => println!("{USAGE}"),
         [flag] if flag == "--help" || flag == "-h" => println!("{USAGE}"),
         [command] if command == "capabilities" => capabilities(),
+        [command] if command == "doctor" => doctor(),
+        [command] if command == "version" || command == "--version" => version(false),
+        [command, flag] if command == "version" && flag == "--verbose" => version(true),
         [command, flag] if command == "capabilities" && flag == "--json" => capabilities_json(),
         [command, path] if command == "inspect" => {
             let image = read_file(Path::new(path))?;
@@ -43,10 +47,52 @@ fn command(args: Vec<OsString>) -> Result<u32, Error> {
                 }
             }
         }
-        [command, rest @ ..] if command == "run" => return run(rest),
+        [command, rest @ ..] if command == "run" => return run(rest, &mut ()),
+        [command, path, flag, output] if command == "trace" && flag == "--output" => {
+            let mut trace = trace::JsonLines::open(Path::new(output))?;
+            let outcome = run(&["--".into(), path.clone()], &mut trace);
+            trace.finish(&outcome)?;
+            return outcome;
+        }
         _ => return Err(USAGE.into()),
     }
     Ok(0)
+}
+
+fn doctor() {
+    let profile = RuntimeProfile::default();
+    let host = profile.host();
+    println!("Host {:?}/{:?}", host.os, host.isa);
+    match host.page_size {
+        Some(bytes) => println!("Host page size {bytes} bytes"),
+        None => println!("Host page size unavailable"),
+    }
+    println!("Executable memory {:?}", host.executable_memory);
+    for id in [
+        "interpreter",
+        "jit-cranelift",
+        "linux-elf",
+        "windows-pe",
+        "macho-inspect",
+    ] {
+        let item = profile
+            .capabilities()
+            .get(id)
+            .expect("diagnostic capability");
+        println!("{id} {:?}  {}", item.status(), item.detail());
+    }
+}
+
+fn version(verbose: bool) {
+    println!("bifrost {}", env!("CARGO_PKG_VERSION"));
+    if verbose {
+        println!("Target {}/{}", std::env::consts::OS, std::env::consts::ARCH);
+        println!(
+            "Revision {}",
+            option_env!("BIFROST_BUILD_REVISION").unwrap_or("unknown")
+        );
+        println!("Cranelift feature {}", cfg!(feature = "jit"));
+    }
 }
 
 fn capabilities() {
@@ -75,8 +121,12 @@ fn capabilities_json() {
     let profile = RuntimeProfile::default();
     let host = profile.host();
     println!(
-        "{{\"schema\":1,\"host\":{{\"os\":\"{:?}\",\"isa\":\"{:?}\",\"executable_memory\":\"{:?}\"}},\"capabilities\":[",
-        host.os, host.isa, host.executable_memory
+        "{{\"schema\":1,\"host\":{{\"os\":\"{:?}\",\"isa\":\"{:?}\",\"executable_memory\":\"{:?}\",\"page_size\":{}}},\"capabilities\":[",
+        host.os,
+        host.isa,
+        host.executable_memory,
+        host.page_size
+            .map_or_else(|| "null".into(), |size| size.to_string())
     );
     for (index, item) in profile.capabilities().iter().enumerate() {
         if index != 0 {
@@ -105,7 +155,7 @@ fn read_file(path: &Path) -> Result<Vec<u8>, Error> {
     Ok(bytes)
 }
 
-fn run(args: &[OsString]) -> Result<u32, Error> {
+fn run(args: &[OsString], trace: &mut dyn TraceSink) -> Result<u32, Error> {
     let mut options = RunOptions::default();
     let mut vfs = Vfs::default();
     let mut mounted = false;
@@ -168,7 +218,7 @@ fn run(args: &[OsString]) -> Result<u32, Error> {
         if mounted || argv.len() > 1 {
             return Err("PE execution currently accepts neither mounts nor guest arguments".into());
         }
-        process::run_windows(
+        process::run_windows_traced(
             &image,
             WindowsIo {
                 stdout: &mut stdout,
@@ -176,12 +226,13 @@ fn run(args: &[OsString]) -> Result<u32, Error> {
             },
             api.unwrap_or(ApiPolicy::Auto),
             options,
+            trace,
         )
     } else {
         if api.is_some() {
             return Err("--api applies to Windows PE images".into());
         }
-        process::run_linux(
+        process::run_linux_traced(
             &image,
             &argv,
             &[],
@@ -192,6 +243,7 @@ fn run(args: &[OsString]) -> Result<u32, Error> {
             },
             &vfs,
             options,
+            trace,
         )
     };
     stdout.flush()?;

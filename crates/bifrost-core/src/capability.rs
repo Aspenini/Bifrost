@@ -60,6 +60,10 @@ impl Capability {
     pub const fn detail(&self) -> &'static str {
         self.detail
     }
+
+    pub const fn status(&self) -> CapabilityStatus {
+        self.status
+    }
     pub const fn level(&self) -> SupportLevel {
         match self.status {
             CapabilityStatus::Available(level) => level,

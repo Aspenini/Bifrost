@@ -22,6 +22,7 @@ os-linux = ["dep:bifrost-os-linux"]
 os-windows = ["dep:bifrost-os-windows"]
 host-windows = ["dep:bifrost-host-windows"]
 host-linux = ["dep:bifrost-host-linux"]
+host-macos = ["dep:bifrost-host-macos"]
 
 [dependencies]
 bifrost-core.workspace = true
@@ -46,6 +47,7 @@ bifrost-os-linux = { workspace = true, optional = true }
 bifrost-os-windows = { workspace = true, optional = true }
 bifrost-host-windows = { workspace = true, optional = true }
 bifrost-host-linux = { workspace = true, optional = true }
+bifrost-host-macos = { workspace = true, optional = true }
 
 [dev-dependencies]
 bifrost-testkit.workspace = true

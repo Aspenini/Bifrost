@@ -81,6 +81,25 @@ fn probe_jit() -> bool {
     }
 }
 
+fn probe_page_size() -> Option<usize> {
+    #[cfg(all(feature = "host-macos", target_os = "macos"))]
+    return bifrost_host_macos::page_size();
+    #[cfg(all(
+        feature = "host-linux",
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ))]
+    return bifrost_host_linux::page_size();
+    #[cfg(all(
+        feature = "host-windows",
+        target_os = "windows",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ))]
+    return bifrost_host_windows::page_size();
+    #[allow(unreachable_code)]
+    None
+}
+
 #[derive(Clone, Debug)]
 pub struct RuntimeProfile {
     host: HostTarget,
@@ -93,6 +112,7 @@ impl Default for RuntimeProfile {
         let jit_available = probe_jit();
         let jit_ready = jit_available;
         let mut host = HostTarget::current();
+        host.page_size = probe_page_size();
         if JIT_HOST {
             host.executable_memory = if jit_available {
                 ExecutableMemoryPolicy::WriteThenExecute
@@ -239,19 +259,45 @@ impl Default for RuntimeProfile {
                 .register(record)
                 .expect("unique Linux capability");
         }
-        for (id, compiled) in [
-            ("host-windows", cfg!(feature = "host-windows")),
-            ("host-linux", cfg!(feature = "host-linux")),
-            ("native-execution", false),
-            ("c-abi", false),
+        for (id, enabled, os) in [
+            (
+                "host-windows",
+                cfg!(feature = "host-windows"),
+                bifrost_core::HostOs::Windows,
+            ),
+            (
+                "host-linux",
+                cfg!(feature = "host-linux"),
+                bifrost_core::HostOs::Linux,
+            ),
+            (
+                "host-macos",
+                cfg!(feature = "host-macos"),
+                bifrost_core::HostOs::MacOs,
+            ),
         ] {
-            let detail = if compiled {
-                "crate boundary reserved"
+            let record = if enabled {
+                Capability::implemented(
+                    id,
+                    host.os == os && host.page_size.is_some(),
+                    SupportLevel::Partial,
+                    "host page-size probe",
+                )
+                .expect("implemented support level")
             } else {
-                "component unavailable in this build"
+                Capability::planned(id, false, "enable the matching host feature")
             };
             capabilities
-                .register(Capability::planned(id, compiled, detail))
+                .register(record)
+                .expect("unique host capability");
+        }
+        for id in ["native-execution", "c-abi"] {
+            capabilities
+                .register(Capability::planned(
+                    id,
+                    false,
+                    "component unavailable in this build",
+                ))
                 .expect("unique built-in capability");
         }
         let macho = if cfg!(feature = "macho-inspect") {

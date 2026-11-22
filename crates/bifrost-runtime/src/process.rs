@@ -2,7 +2,7 @@
 use crate::raw::{ExecutionError, ExitReason, RawInterpreter};
 use bifrost_core::{
     AbiId, CpuState, ExecMode, GuestFault, GuestIsa, GuestMemory, GuestOs, GuestTarget,
-    GuestThread, GuestThreadId,
+    GuestThread, GuestThreadId, TraceEvent, TraceSink,
 };
 use bifrost_loader::LoadError;
 pub use bifrost_loader::{Format, Metadata};
@@ -111,6 +111,17 @@ pub fn run_windows(
     policy: ApiPolicy,
     options: RunOptions,
 ) -> Result<u32, RunError> {
+    run_windows_traced(bytes, io, policy, options, &mut ())
+}
+
+#[cfg(feature = "windows-pe")]
+pub fn run_windows_traced(
+    bytes: &[u8],
+    io: WindowsIo<'_>,
+    policy: ApiPolicy,
+    options: RunOptions,
+    trace: &mut dyn TraceSink,
+) -> Result<u32, RunError> {
     use bifrost_os_windows::{ApiAction, RETURN_PC, STUB_BASE, Windows};
     let pe = bifrost_loader_pe::parse(bytes)?;
     let targets = pe
@@ -134,7 +145,7 @@ pub fn run_windows(
         )
         .map_err(LoadError::from)?;
     let mut windows = Windows::new(io, policy, &targets).map_err(RunError::Windows)?;
-    execute(&mut memory, state, options, |thread, memory| {
+    execute(&mut memory, state, options, trace, |thread, memory| {
         Ok(
             match windows
                 .dispatch(&mut thread.cpu, memory)
@@ -157,9 +168,22 @@ pub fn run_linux<'a>(
     vfs: &'a Vfs,
     options: RunOptions,
 ) -> Result<u32, RunError> {
+    run_linux_traced(bytes, args, environment, io, vfs, options, &mut ())
+}
+
+#[cfg(feature = "linux-elf")]
+pub fn run_linux_traced<'a>(
+    bytes: &[u8],
+    args: &[&[u8]],
+    environment: &[&[u8]],
+    io: Io<'a>,
+    vfs: &'a Vfs,
+    options: RunOptions,
+    trace: &mut dyn TraceSink,
+) -> Result<u32, RunError> {
     let (mut memory, state) = bifrost_loader_elf::parse(bytes)?.start(args, environment)?;
     let mut linux = Linux::new(io, vfs);
-    execute(&mut memory, state, options, |thread, memory| {
+    execute(&mut memory, state, options, trace, |thread, memory| {
         let CpuState::X86_64(cpu) = &mut thread.cpu else {
             return Err(RunError::Backend);
         };
@@ -184,6 +208,7 @@ fn execute(
     memory: &mut bifrost_memory::AddressSpace,
     state: bifrost_core::X86State,
     options: RunOptions,
+    trace: &mut dyn TraceSink,
     mut boundary: impl FnMut(&mut GuestThread, &mut dyn GuestMemory) -> Result<Action, RunError>,
 ) -> Result<u32, RunError> {
     let target = GuestTarget::new(
@@ -196,16 +221,13 @@ fn execute(
     let mode = crate::RuntimeProfile::default()
         .select_execution(target.clone(), options.execution)
         .map_err(RunError::Mode)?;
-    let mut trace = ();
     let mut thread = GuestThread {
         id: GuestThreadId(1),
         cpu: CpuState::X86_64(Box::new(state)),
         pending_fault: None,
     };
     let mut engine = match mode {
-        ExecMode::Interpreter => {
-            Engine::Interpreter(RawInterpreter::new(&target, memory, &mut trace)?)
-        }
+        ExecMode::Interpreter => Engine::Interpreter(RawInterpreter::new(&target, memory, trace)?),
         #[cfg(all(
             feature = "jit-cranelift",
             any(target_arch = "x86_64", target_arch = "aarch64"),
@@ -214,13 +236,21 @@ fn execute(
         ExecMode::Jit => Engine::Jit(Box::new(crate::raw::RawJit::new(
             &target,
             memory,
-            &mut trace,
+            trace,
             crate::raw::SystemJitMemory,
         )?)),
         _ => return Err(RunError::Backend),
     };
     for _ in 0..options.instruction_limit {
-        match boundary(&mut thread, engine.memory())? {
+        let pc = thread.cpu.pc();
+        let action = boundary(&mut thread, engine.memory());
+        if !matches!(&action, Ok(Action::Step)) {
+            engine.trace().record(TraceEvent::Step {
+                thread: thread.id,
+                pc,
+            });
+        }
+        match action? {
             Action::Exit(status) => return Ok(status),
             Action::Continue => continue,
             Action::Step => {}
@@ -245,6 +275,18 @@ enum Engine<'a> {
 }
 
 impl Engine<'_> {
+    fn trace(&mut self) -> &mut dyn TraceSink {
+        match self {
+            Self::Interpreter(engine) => engine.trace_mut(),
+            #[cfg(all(
+                feature = "jit-cranelift",
+                any(target_arch = "x86_64", target_arch = "aarch64"),
+                any(target_os = "linux", target_os = "windows")
+            ))]
+            Self::Jit(engine) => engine.trace_mut(),
+        }
+    }
+
     fn memory(&mut self) -> &mut dyn GuestMemory {
         match self {
             Self::Interpreter(engine) => engine.memory_mut(),

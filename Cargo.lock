@@ -155,6 +155,9 @@ dependencies = [
 [[package]]
 name = "bifrost-host-macos"
 version = "0.1.0"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "bifrost-host-windows"
@@ -278,6 +281,7 @@ dependencies = [
  "bifrost-executor",
  "bifrost-host",
  "bifrost-host-linux",
+ "bifrost-host-macos",
  "bifrost-host-windows",
  "bifrost-interpreter",
  "bifrost-ir",

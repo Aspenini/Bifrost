@@ -216,6 +216,11 @@ pub struct RawInterpreter<'a> {
 
 #[cfg(feature = "interp")]
 impl<'a> RawInterpreter<'a> {
+    #[cfg(any(feature = "linux-elf", feature = "windows-pe"))]
+    pub(crate) fn trace_mut(&mut self) -> &mut dyn TraceSink {
+        self.trace
+    }
+
     pub fn memory_mut(&mut self) -> &mut dyn GuestMemory {
         self.memory
     }
