@@ -25,6 +25,29 @@ clang -Wall -Wextra -Werror -I crates/bifrost-ffi/include examples/c-embed/main.
 
 The SDK workflow prepares downloadable archives on tagged commits and manual runs. It builds and tests each archive on its matching runner before upload.
 
+## Use an extracted SDK
+
+From the extracted archive root on Linux or macOS, link the example against the bundled shared library.
+
+```sh
+cc -Wall -Wextra -Werror -I include example/main.c -L lib -lbifrost_ffi -Wl,-rpath,"$PWD/lib" -o example/c-embed
+example/c-embed example/hello.elf
+```
+
+From the extracted archive root on Windows, place the example next to the DLL. Use the corresponding `--target` if Clang defaults to a different architecture.
+
+```powershell
+clang -Wall -Wextra -Werror -I include example/main.c lib/bifrost_ffi.dll.lib -o bin/c-embed.exe
+./bin/c-embed.exe example/hello.elf
+```
+
+To assemble a local archive from the repository, build the release CLI and library, then pass the matching target triple to the packager. Use `--build-dir target/<triple>/release` for a Cargo build with an explicit `--target`.
+
+```sh
+cargo build --locked --release -p bifrost-cli -p bifrost-ffi
+python scripts/package-sdk.py x86_64-unknown-linux-gnu
+```
+
 ## Host isolation
 
 For Linux hosts with Bubblewrap and enabled user namespaces, the companion launcher runs Bifröst in a separate mount, network, and PID namespace. It clears the environment, drops capabilities, exposes system libraries read-only, and supplies the runner and guest image through explicit read-only mounts. It uses the interpreter and exits if isolation setup fails.

@@ -32,44 +32,34 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: rustup show
+      - run: rustup target add ${{ matrix.target }}
       - name: Build release SDK
-        run: cargo build --locked --release -p bifrost-cli -p bifrost-ffi
+        run: cargo build --locked --release --target ${{ matrix.target }} -p bifrost-cli -p bifrost-ffi
       - name: Run guest fixtures
-        run: cargo test --locked --release -p bifrost-cli
-      - name: Compile and run C example (Windows)
+        run: cargo test --locked --release --target ${{ matrix.target }} -p bifrost-cli
+      - name: Archive SDK
+        run: python scripts/package-sdk.py ${{ matrix.target }} --build-dir target/${{ matrix.target }}/release
+      - name: Extract SDK for smoke tests
+        run: python -m tarfile -e target/sdk/bifrost-${{ matrix.target }}.tar.gz target/sdk/smoke
+      - name: Test extracted SDK (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
+        working-directory: target/sdk/smoke
         run: |
-          clang --target=${{ matrix.target }} -Wall -Wextra -Werror -I crates/bifrost-ffi/include examples/c-embed/main.c target/release/bifrost_ffi.dll.lib -o target/release/c-embed.exe
+          ./bin/bifrost.exe inspect example/hello.elf
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          ./target/release/c-embed.exe tests/fixtures/linux/hello.elf
-      - name: Compile and run C example (Unix)
+          clang --target=${{ matrix.target }} -Wall -Wextra -Werror -I include example/main.c lib/bifrost_ffi.dll.lib -o bin/c-embed.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./bin/c-embed.exe example/hello.elf
+      - name: Test extracted SDK (Unix)
         if: runner.os != 'Windows'
+        working-directory: target/sdk/smoke
         run: |
-          cc -Wall -Wextra -Werror -I crates/bifrost-ffi/include examples/c-embed/main.c -L target/release -lbifrost_ffi -Wl,-rpath,"$PWD/target/release" -o target/release/c-embed
-          ./target/release/c-embed tests/fixtures/linux/hello.elf
-      - name: Stage SDK
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force package/bin,package/lib,package/include,package/example
-          if ($IsWindows) {
-              Copy-Item target/release/bifrost.exe,target/release/bifrost_ffi.dll package/bin
-              Copy-Item target/release/bifrost_ffi.dll.lib,target/release/bifrost_ffi.lib package/lib
-          } elseif ($IsMacOS) {
-              Copy-Item target/release/bifrost package/bin
-              Copy-Item target/release/libbifrost_ffi.dylib,target/release/libbifrost_ffi.a package/lib
-          } else {
-              Copy-Item target/release/bifrost package/bin
-              Copy-Item target/release/libbifrost_ffi.so,target/release/libbifrost_ffi.a package/lib
-          }
-          Copy-Item crates/bifrost-ffi/include/bifrost.h package/include
-          Copy-Item examples/c-embed/main.c,tests/fixtures/linux/hello.elf package/example
-          Copy-Item LICENSE-MIT,LICENSE-APACHE,docs/sdk.md package
-      - name: Archive SDK
-        shell: bash
-        run: tar -C package -czf bifrost-${{ matrix.target }}.tar.gz .
+          ./bin/bifrost inspect example/hello.elf
+          cc -Wall -Wextra -Werror -I include example/main.c -L lib -lbifrost_ffi -Wl,-rpath,"$PWD/lib" -o example/c-embed
+          ./example/c-embed example/hello.elf
       - uses: actions/upload-artifact@v4
         with:
           name: bifrost-${{ matrix.target }}
-          path: bifrost-${{ matrix.target }}.tar.gz
+          path: target/sdk/bifrost-${{ matrix.target }}.tar.gz
           if-no-files-found: error

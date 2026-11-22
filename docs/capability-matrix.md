@@ -21,10 +21,10 @@
 
 | Host | Execution path | Validation evidence |
 | --- | --- | --- |
-| Windows x86-64 | Interpreter, JIT, native PE console writes | ELF and PE fixtures and C example |
-| Linux x86-64 | Interpreter, JIT, portable PE provider | ELF and PE fixtures and C example under WSL |
-| Linux ARM64 | Interpreter, JIT, portable PE provider | Raw executors and direct ELF and PE CLI runs under QEMU, with native CI configured |
-| Windows ARM64 | Interpreter, JIT, native PE console writes | Cross-checked all targets and features, native CI configured |
+| Windows x86-64 | Interpreter, JIT, native PE console writes | ELF and PE fixtures and C example from the extracted release SDK |
+| Linux x86-64 | Interpreter, JIT, portable PE provider | ELF and PE fixtures and C example from the extracted release SDK under WSL |
+| Linux ARM64 | Interpreter, JIT, portable PE provider | Raw executors, direct ELF and PE CLI runs, and extracted release SDK C example under QEMU. Native CI configured. |
+| Windows ARM64 | Interpreter, JIT, native PE console writes | Cross-checked all targets and features, linked the release SDK and C example, native CI configured |
 | macOS ARM64 | Interpreter and portable providers | Cross-checked all targets and features, native CI configured |
 | macOS x86-64 | Interpreter and portable providers | Cross-checked all targets and features, native CI configured |
 
