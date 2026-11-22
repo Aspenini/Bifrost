@@ -1,7 +1,16 @@
-#![cfg(target_arch = "x86_64")]
+#![cfg(any(
+    target_arch = "x86_64",
+    all(target_arch = "aarch64", target_os = "linux")
+))]
 
+#[cfg(target_arch = "x86_64")]
 #[allow(unsafe_code)]
-mod hardware;
+#[path = "hardware.rs"]
+mod reference;
+
+#[cfg(target_arch = "aarch64")]
+#[path = "portable_x86.rs"]
+mod reference;
 
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 use bifrost_runtime::x86::{SystemJitMemory, X86Jit};
@@ -11,7 +20,23 @@ use bifrost_runtime::{
     x86::{ExecutionBudget, Executor, ExitReason, X86Interpreter},
 };
 use bifrost_testkit::x86::{ARITHMETIC_FLAGS, CALL_AND_RETURN, MOVE_AND_ADD};
-use hardware::{Arithmetic, Branch};
+
+#[derive(Clone, Copy, Debug)]
+enum Arithmetic {
+    Add,
+    Sub,
+    Cmp,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum Branch {
+    Equal,
+    NotEqual,
+    Below,
+    AboveOrEqual,
+    Less,
+    GreaterOrEqual,
+}
 
 const ENTRY: Addr = Addr(0x1000);
 const DATA: Addr = Addr(0x2000);
@@ -105,7 +130,7 @@ fn random_pairs(count: usize) -> impl Iterator<Item = (u64, u64)> {
 }
 
 #[test]
-fn arithmetic_register_and_immediate_forms_match_the_cpu() {
+fn arithmetic_register_and_immediate_forms_match_reference() {
     let pairs = EDGE_VALUES
         .into_iter()
         .flat_map(|lhs| EDGE_VALUES.into_iter().map(move |rhs| (lhs, rhs)));
@@ -131,11 +156,11 @@ fn arithmetic_register_and_immediate_forms_match_the_cpu() {
                 (accumulator_encoding, i64::from(imm32) as u64),
             ];
             for (encoding, effective_rhs) in encodings {
-                let (native_rax, native_flags) = hardware::arithmetic(op, lhs, effective_rhs);
+                let (expected_rax, expected_flags) = reference::arithmetic(op, lhs, effective_rhs);
                 let (guest, _) = interpret(&encoding, 1, &[(0, lhs), (3, rhs)]);
                 assert_eq!(
                     (guest.gpr[0], guest.rflags & ARITHMETIC_FLAGS),
-                    (native_rax, native_flags & ARITHMETIC_FLAGS),
+                    (expected_rax, expected_flags & ARITHMETIC_FLAGS),
                     "{op:?} bytes {encoding:02x?} lhs={lhs:#x} rhs={effective_rhs:#x}",
                 );
                 assert_eq!(guest.rip, Addr(ENTRY.0 + encoding.len() as u64));
@@ -146,7 +171,7 @@ fn arithmetic_register_and_immediate_forms_match_the_cpu() {
 }
 
 #[test]
-fn short_and_near_conditionals_match_native_branch_choices() {
+fn short_and_near_conditionals_match_reference_branch_choices() {
     for (condition, opcode) in [
         (Branch::Equal, 0x74),
         (Branch::NotEqual, 0x75),
@@ -165,7 +190,7 @@ fn short_and_near_conditionals_match_native_branch_choices() {
             (i64::MAX as u64, u64::MAX),
         ];
         for (lhs, rhs) in edges.into_iter().chain(random_pairs(32)) {
-            let taken = hardware::branch(condition, lhs, rhs);
+            let taken = reference::branch(condition, lhs, rhs);
             for branch in [vec![opcode, 4], vec![0x0f, opcode + 0x10, 4, 0, 0, 0]] {
                 let mut code = vec![0x48, 0x39, 0xd8]; // cmp rax, rbx
                 code.extend(branch);
@@ -181,8 +206,8 @@ fn short_and_near_conditionals_match_native_branch_choices() {
 }
 
 #[test]
-fn unaligned_and_indexed_memory_match_native_values() {
-    let native = hardware::move_and_add();
+fn unaligned_and_indexed_memory_match_reference_values() {
+    let expected = reference::move_and_add();
     let (guest, memory) = interpret(MOVE_AND_ADD, 4, &[(4, DATA.0 + 9)]);
     assert_eq!(
         (
@@ -190,7 +215,7 @@ fn unaligned_and_indexed_memory_match_native_values() {
             read_qword(&memory, Addr(DATA.0 + 1)),
             guest.rflags & ARITHMETIC_FLAGS
         ),
-        (native.0, native.1, native.2 & ARITHMETIC_FLAGS)
+        (expected.0, expected.1, expected.2 & ARITHMETIC_FLAGS)
     );
 
     // mov qword [rax + rcx*4 + 1], -2; mov rax, [rax + rcx*4 + 1]
@@ -200,12 +225,12 @@ fn unaligned_and_indexed_memory_match_native_values() {
     let (guest, memory) = interpret(&code, 2, &[(0, DATA.0), (1, 2)]);
     assert_eq!(
         (guest.gpr[0], read_qword(&memory, Addr(DATA.0 + 9))),
-        hardware::indexed_immediate_store()
+        reference::indexed_immediate_store()
     );
 }
 
 #[test]
-fn register_moves_nop_near_jump_and_rip_relative_load_match_native() {
+fn register_moves_nop_near_jump_and_rip_relative_load_match_reference() {
     let code = [
         0x48, 0xc7, 0xc0, 0xfe, 0xff, 0xff, 0xff, // mov rax, -2
         0x48, 0x89, 0xc1, // mov rcx, rax
@@ -216,23 +241,28 @@ fn register_moves_nop_near_jump_and_rip_relative_load_match_native() {
         0x48, 0x01, 0xc8, // add rax, rcx
     ];
     let (guest, _) = interpret(&code, 6, &[]);
-    assert_eq!(guest.gpr[0], hardware::move_and_jump());
+    assert_eq!(guest.gpr[0], reference::move_and_jump());
     assert_eq!(guest.gpr[1], u64::MAX - 1);
     assert_eq!(guest.rip, Addr(ENTRY.0 + code.len() as u64));
 }
 
 #[test]
-fn call_pushes_the_return_pc_and_ret_restores_the_stack_like_native() {
+fn call_pushes_the_return_pc_and_ret_restores_the_stack() {
     for initial in EDGE_VALUES {
-        let (native_rax, native_flags, correct_return, balanced_stack) =
-            hardware::call_and_return(initial);
-        assert!(correct_return && balanced_stack);
+        #[cfg(target_arch = "x86_64")]
+        let (expected_rax, expected_flags) = {
+            let (rax, flags, correct_return, balanced_stack) = reference::call_and_return(initial);
+            assert!(correct_return && balanced_stack);
+            (rax, flags)
+        };
+        #[cfg(target_arch = "aarch64")]
+        let (expected_rax, expected_flags) = reference::arithmetic(Arithmetic::Add, initial, 1);
         let stack = Addr(DATA.0 + 4096);
         let (guest, memory) = interpret(CALL_AND_RETURN, 4, &[(0, initial), (4, stack.0)]);
-        assert_eq!(guest.gpr[0], native_rax);
+        assert_eq!(guest.gpr[0], expected_rax);
         assert_eq!(
             guest.rflags & ARITHMETIC_FLAGS,
-            native_flags & ARITHMETIC_FLAGS
+            expected_flags & ARITHMETIC_FLAGS
         );
         assert_eq!(guest.gpr[4], stack.0);
         assert_eq!(

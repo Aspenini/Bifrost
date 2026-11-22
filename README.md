@@ -15,7 +15,7 @@ cargo run --locked -p bifrost-example-verify-ir
 cargo run --locked -p bifrost-cli --features bifrost-runtime/guest-x86_64,bifrost-runtime/interp -- capabilities
 ```
 
-The raw-code example prints `RAX = 42, RIP = 0x1018` with either execution backend. The JIT example uses the system executable-memory adapter on Windows or Linux x86-64. The verification example prints a hand-authored IR fixture.
+The raw-code example prints `RAX = 42, RIP = 0x1018` with either execution backend. The JIT example uses the system executable-memory adapter on Windows x86-64 and Linux x86-64/ARM64. The verification example prints a hand-authored IR fixture.
 
 | Crate | API |
 | --- | --- |

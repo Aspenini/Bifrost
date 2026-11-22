@@ -19,15 +19,25 @@ pub mod x86;
 const RAW_X86: bool = cfg!(all(feature = "guest-x86_64", feature = "interp"));
 const JIT_HOST: bool = cfg!(all(
     feature = "jit-cranelift",
-    target_arch = "x86_64",
-    any(target_os = "linux", target_os = "windows")
+    any(
+        all(
+            target_arch = "x86_64",
+            any(target_os = "linux", target_os = "windows")
+        ),
+        all(target_arch = "aarch64", target_os = "linux")
+    )
 ));
 
 fn probe_jit() -> bool {
     #[cfg(all(
         feature = "jit-cranelift",
-        target_arch = "x86_64",
-        any(target_os = "linux", target_os = "windows")
+        any(
+            all(
+                target_arch = "x86_64",
+                any(target_os = "linux", target_os = "windows")
+            ),
+            all(target_arch = "aarch64", target_os = "linux")
+        )
     ))]
     {
         use bifrost_host::jit::JitMemoryManager;
@@ -36,12 +46,17 @@ fn probe_jit() -> bool {
         #[cfg(target_os = "windows")]
         use bifrost_host_windows::jit::WindowsJitMemory as SystemMemory;
 
-        bifrost_codegen_clif::Compiler::new().is_ok() && SystemMemory.publish(&[0xc3]).is_ok()
+        bifrost_codegen_clif::Compiler::new().is_ok() && SystemMemory.publish(&[0; 4]).is_ok()
     }
     #[cfg(not(all(
         feature = "jit-cranelift",
-        target_arch = "x86_64",
-        any(target_os = "linux", target_os = "windows")
+        any(
+            all(
+                target_arch = "x86_64",
+                any(target_os = "linux", target_os = "windows")
+            ),
+            all(target_arch = "aarch64", target_os = "linux")
+        )
     )))]
     {
         false

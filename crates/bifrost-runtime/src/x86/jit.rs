@@ -10,7 +10,10 @@ use bifrost_lifter_x86::X86Lifter;
 use bifrost_memory::{AddressSpace, AddressSpaceId};
 use std::collections::BTreeMap;
 
-#[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+#[cfg(all(
+    target_os = "linux",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
 pub use bifrost_host_linux::jit::LinuxJitMemory as SystemJitMemory;
 #[cfg(all(target_arch = "x86_64", target_os = "windows"))]
 pub use bifrost_host_windows::jit::WindowsJitMemory as SystemJitMemory;

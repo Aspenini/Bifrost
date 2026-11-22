@@ -1,13 +1,7 @@
 //! Fixed native oracles. All assembly is compiled into the test executable.
 
+use super::{Arithmetic, Branch};
 use core::arch::asm;
-
-#[derive(Clone, Copy, Debug)]
-pub enum Arithmetic {
-    Add,
-    Sub,
-    Cmp,
-}
 
 macro_rules! scalar {
     ($opcode:literal, $lhs:expr, $rhs:expr) => {{
@@ -34,16 +28,6 @@ pub fn arithmetic(op: Arithmetic, lhs: u64, rhs: u64) -> (u64, u64) {
         Arithmetic::Sub => scalar!("sub", lhs, rhs),
         Arithmetic::Cmp => scalar!("cmp", lhs, rhs),
     }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub enum Branch {
-    Equal,
-    NotEqual,
-    Below,
-    AboveOrEqual,
-    Less,
-    GreaterOrEqual,
 }
 
 macro_rules! branch {

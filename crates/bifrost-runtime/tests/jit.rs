@@ -2,8 +2,13 @@
     feature = "guest-x86_64",
     feature = "interp",
     feature = "jit-cranelift",
-    target_arch = "x86_64",
-    any(target_os = "linux", target_os = "windows")
+    any(
+        all(
+            target_arch = "x86_64",
+            any(target_os = "linux", target_os = "windows")
+        ),
+        all(target_arch = "aarch64", target_os = "linux")
+    )
 ))]
 
 use bifrost_runtime::{
