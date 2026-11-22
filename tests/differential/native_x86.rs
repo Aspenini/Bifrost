@@ -13,11 +13,14 @@ mod reference;
 mod reference;
 
 #[cfg(any(target_os = "linux", target_os = "windows"))]
-use bifrost_runtime::x86::{SystemJitMemory, X86Jit};
+use bifrost_runtime::raw::{RawJit, SystemJitMemory};
 use bifrost_runtime::{
-    core::{CpuState, GuestAddress as Addr, GuestThread, GuestThreadId, X86State},
+    core::{
+        AbiId, CpuState, GuestAddress as Addr, GuestIsa, GuestOs, GuestTarget, GuestThread,
+        GuestThreadId, X86State,
+    },
     memory::{AddressSpace, GuestMemory, GuestMemoryRead, Protection},
-    x86::{ExecutionBudget, Executor, ExitReason, X86Interpreter},
+    raw::{ExecutionBudget, Executor, ExitReason, RawInterpreter},
 };
 use bifrost_testkit::x86::{ARITHMETIC_FLAGS, CALL_AND_RETURN, MOVE_AND_ADD};
 
@@ -53,6 +56,13 @@ fn address_space(code: &[u8]) -> AddressSpace {
 }
 
 fn interpret(code: &[u8], count: u64, registers: &[(usize, u64)]) -> (X86State, AddressSpace) {
+    let target = GuestTarget::new(
+        GuestIsa::X86_64,
+        GuestOs::None,
+        AbiId::Bare,
+        Default::default(),
+    )
+    .unwrap();
     let mut memory = address_space(code);
     let mut cpu = X86State {
         rip: ENTRY,
@@ -71,14 +81,15 @@ fn interpret(code: &[u8], count: u64, registers: &[(usize, u64)]) -> (X86State, 
     };
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     let mut jitted = thread.clone();
-    let exit = X86Interpreter::new(&mut memory, &mut ())
+    let exit = RawInterpreter::new(&target, &mut memory, &mut ())
+        .unwrap()
         .run(&mut thread, budget)
         .unwrap();
     assert_eq!(exit, ExitReason::BudgetExhausted);
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     {
         let mut native_memory = address_space(code);
-        let actual = X86Jit::new(&mut native_memory, &mut (), SystemJitMemory)
+        let actual = RawJit::new(&target, &mut native_memory, &mut (), SystemJitMemory)
             .unwrap()
             .run(&mut jitted, budget)
             .unwrap();

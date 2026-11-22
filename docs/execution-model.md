@@ -1,6 +1,6 @@
 # Execution model
 
-The raw x86-64 SDK runs the [declared scalar subset](x86-64-subset.md). Enable `guest-x86_64` with either `interp` for `bifrost_runtime::x86::X86Interpreter` or `jit-cranelift` for `bifrost_runtime::x86::X86Jit`. The caller owns guest memory and thread state, supplies the entry PC and optional trace sink, and sets the instruction budget.
+The raw SDK runs the documented [x86-64](x86-64-subset.md) and [ARM64](arm64-subset.md) scalar subsets. Enable the required guest feature and either `interp` or `jit-cranelift`. Both `bifrost_runtime::raw::RawInterpreter` and `bifrost_runtime::raw::RawJit` select the frontend from a bare `GuestTarget`. The caller owns guest memory and thread state, supplies the entry PC and optional trace sink, and sets the instruction budget. The `x86` module also supplies convenience constructors for older callers.
 
 A successful step returns the next guest PC. The runtime fetches one instruction from executable guest pages, lifts and verifies it, then interprets the IR or runs the corresponding host code. `run` repeats until a guest fault, a typed error, or exhaustion of the instruction budget. The next fetch after the last instruction in a buffer follows guest memory permissions.
 

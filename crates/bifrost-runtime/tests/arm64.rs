@@ -212,4 +212,69 @@ fn arm64_jit_agrees_on_guest_state_faults_and_trace() {
             assert_eq!(actual, expected);
         }
     }
+
+    let (mut memory, mut thread) = memory_and_thread(&[0xd400_0001], Protection::ReadWrite);
+    let before = thread.clone();
+    let error = RawJit::new(&target(), &mut memory, &mut (), SystemJitMemory)
+        .unwrap()
+        .step(&mut thread)
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        ExecutionError::Arm64Lift(bifrost_lifter_arm64::LiftError::UnsupportedInstruction {
+            pc: CODE,
+            word: 0xd400_0001,
+            ..
+        })
+    ));
+    assert_eq!(thread, before);
+}
+
+#[cfg(all(
+    feature = "jit-cranelift",
+    any(
+        all(
+            target_arch = "x86_64",
+            any(target_os = "linux", target_os = "windows")
+        ),
+        all(target_arch = "aarch64", target_os = "linux")
+    )
+))]
+#[test]
+fn arm64_cache_checks_all_code_page_generations() {
+    use bifrost_runtime::raw::{RawJit, SystemJitMemory};
+
+    let mut memory = AddressSpace::new(2, 2).unwrap();
+    memory.map(CODE, 4, Protection::ReadWrite).unwrap();
+    memory.write(CODE, &0xd280_0020_u32.to_le_bytes()).unwrap(); // MOVZ X0,#1
+    memory.protect(CODE, 4, Protection::Execute).unwrap();
+    let second_page = Addr(CODE.0 + 2);
+    let mut trace = ();
+    let mut jit = RawJit::new(&target(), &mut memory, &mut trace, SystemJitMemory).unwrap();
+    let mut thread = memory_and_thread(&[], Protection::None).1;
+    for _ in 0..2 {
+        thread.cpu.set_pc(CODE);
+        assert_eq!(
+            jit.step(&mut thread).unwrap(),
+            ExitReason::Dispatch(Addr(CODE.0 + 4))
+        );
+        assert_eq!(state(&thread).x[0], 1);
+    }
+    assert_eq!(jit.cache_stats().hits, 1);
+    jit.memory_mut()
+        .protect(second_page, 2, Protection::ReadWrite)
+        .unwrap();
+    jit.memory_mut()
+        .write(second_page, &0x9280_u16.to_le_bytes())
+        .unwrap(); // MOVN X0,#1
+    jit.memory_mut()
+        .protect(second_page, 2, Protection::Execute)
+        .unwrap();
+    thread.cpu.set_pc(CODE);
+    assert_eq!(
+        jit.step(&mut thread).unwrap(),
+        ExitReason::Dispatch(Addr(CODE.0 + 4))
+    );
+    assert_eq!(state(&thread).x[0], u64::MAX - 1);
+    assert_eq!(jit.cache_stats().misses, 2);
 }

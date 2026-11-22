@@ -25,8 +25,11 @@ jobs:
       - run: cargo doc --locked --workspace --all-features --no-deps
       - run: cargo check --locked -p bifrost-runtime --no-default-features
       - run: cargo test --locked -p bifrost-runtime --no-default-features
+      - run: cargo check --locked -p bifrost-runtime --no-default-features --features "guest-aarch64,interp"
+      - run: cargo check --locked -p bifrost-runtime --no-default-features --features "guest-aarch64,jit-cranelift"
       - run: cargo run --locked -p xtask -- check-deps
       - run: cargo run --locked -p bifrost-example-verify-ir
       - run: cargo run --locked -p bifrost-example-execute-raw-x86
       - run: cargo run --locked -p bifrost-example-execute-raw-x86 --features jit-cranelift
+      - run: cargo run --locked -p bifrost-example-execute-raw-arm64 --features jit-cranelift
       - run: cargo run --locked -p bifrost-cli -- capabilities

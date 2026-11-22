@@ -31,6 +31,7 @@ members = [
     "crates/bifrost-testkit",
     "apps/bifrost-cli",
     "examples/execute-raw-x86",
+    "examples/execute-raw-arm64",
     "examples/verify-ir",
     "tests/differential",
     "xtask",

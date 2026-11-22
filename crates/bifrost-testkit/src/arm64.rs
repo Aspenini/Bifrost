@@ -1,8 +1,7 @@
 //! Self-authored A64 raw instructions and their expected guest results.
 
-/// movz x0,#41; str x0,[x1,#8]; dmb ish; ldr x2,[x1,#8]; adds x0,x2,#1;
-/// cmp x0,#42; b.ne fail; bl increment; b done; fail: udf #0;
-/// increment: add x0,x0,#1; ret; done: nop.
+/// Stores 41, orders the subsequent load with DMB, and adds one. A matching comparison
+/// reaches a BL/RET pair that adds one more before branching over the UDF path.
 pub const MOVE_ADD_AND_CALL: [u32; 13] = [
     0xd280_0520,
     0xf900_0420,

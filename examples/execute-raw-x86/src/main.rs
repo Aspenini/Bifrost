@@ -1,11 +1,20 @@
 use bifrost_runtime::{
-    core::{CpuState, GuestAddress, GuestThread, GuestThreadId, X86State},
+    core::{
+        AbiId, CpuState, GuestAddress, GuestIsa, GuestOs, GuestTarget, GuestThread, GuestThreadId,
+        X86State,
+    },
     memory::{AddressSpace, GuestMemory, Protection},
-    x86::{ExecutionBudget, Executor, ExitReason},
+    raw::{ExecutionBudget, Executor, ExitReason},
 };
 use bifrost_testkit::x86::MOVE_AND_ADD;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let target = GuestTarget::new(
+        GuestIsa::X86_64,
+        GuestOs::None,
+        AbiId::Bare,
+        Default::default(),
+    )?;
     let entry = GuestAddress(0x1000);
     let mut memory = AddressSpace::new(4096, 2)?;
     memory.map(entry, 4096, Protection::ReadWrite)?;
@@ -23,7 +32,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         cpu: CpuState::X86_64(Box::new(cpu)),
         pending_fault: None,
     };
-    let reason = execute(&mut memory, &mut thread)?;
+    let reason = execute(&target, &mut memory, &mut thread)?;
     let CpuState::X86_64(cpu) = thread.cpu else {
         unreachable!("example uses x86-64");
     };
@@ -44,12 +53,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
 ))]
 fn execute(
+    target: &GuestTarget,
     memory: &mut AddressSpace,
     thread: &mut GuestThread,
 ) -> Result<ExitReason, Box<dyn std::error::Error>> {
-    use bifrost_runtime::x86::{SystemJitMemory, X86Jit};
+    use bifrost_runtime::raw::{RawJit, SystemJitMemory};
     println!("Cranelift JIT");
-    Ok(X86Jit::new(memory, &mut (), SystemJitMemory)?
+    Ok(RawJit::new(target, memory, &mut (), SystemJitMemory)?
         .run(thread, ExecutionBudget { instructions: 4 })?)
 }
 
@@ -64,14 +74,16 @@ fn execute(
     )
 )))]
 fn execute(
+    target: &GuestTarget,
     memory: &mut AddressSpace,
     thread: &mut GuestThread,
 ) -> Result<ExitReason, Box<dyn std::error::Error>> {
-    use bifrost_runtime::x86::X86Interpreter;
+    use bifrost_runtime::raw::RawInterpreter;
     if cfg!(feature = "jit-cranelift") {
         return Err(
             "the example's system executable-memory adapter is unavailable on this host".into(),
         );
     }
-    Ok(X86Interpreter::new(memory, &mut ()).run(thread, ExecutionBudget { instructions: 4 })?)
+    Ok(RawInterpreter::new(target, memory, &mut ())?
+        .run(thread, ExecutionBudget { instructions: 4 })?)
 }

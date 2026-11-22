@@ -10,8 +10,12 @@ publish = false
 name = "native-x86"
 path = "native_x86.rs"
 
+[[test]]
+name = "arm64-guest"
+path = "arm64_guest.rs"
+
 [dev-dependencies]
-bifrost-runtime = { workspace = true, features = ["guest-x86_64", "interp", "jit-cranelift"] }
+bifrost-runtime = { workspace = true, features = ["guest-x86_64", "guest-aarch64", "interp", "jit-cranelift"] }
 bifrost-testkit.workspace = true
 
 [lints.rust]
