@@ -6,5 +6,18 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+[dependencies]
+bifrost-codegen.workspace = true
+bifrost-core.workspace = true
+bifrost-ir.workspace = true
+cranelift-codegen.workspace = true
+cranelift-frontend.workspace = true
+cranelift-native.workspace = true
+
+[dev-dependencies]
+bifrost-decoder-x86.workspace = true
+bifrost-lifter-x86.workspace = true
+bifrost-testkit.workspace = true
+
 [lints]
 workspace = true

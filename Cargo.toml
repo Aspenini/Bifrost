@@ -43,6 +43,9 @@ rust-version = "1.97.1"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
+cranelift-codegen = { version = "=0.134.4", default-features = false, features = ["std", "host-arch"] }
+cranelift-frontend = { version = "=0.134.4", default-features = false, features = ["std"] }
+cranelift-native = { version = "=0.134.4", default-features = false, features = ["std"] }
 iced-x86 = { version = "=1.22.0", default-features = false, features = ["std", "decoder"] }
 bifrost-core = { path = "crates/bifrost-core", version = "0.1.0", default-features = false }
 bifrost-ir = { path = "crates/bifrost-ir", version = "0.1.0", default-features = false }

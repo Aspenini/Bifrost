@@ -1,0 +1,310 @@
+use crate::CompileError;
+use bifrost_core::{FaultClass, GuestAddress};
+use bifrost_ir::{
+    AddressConstraint, Exit, IntOp, IntPredicate, IrBlock, Op, Register, ShiftCount, ShiftOp, Type,
+    ValueId, X86Reg,
+};
+use cranelift_codegen::{
+    ir::{AbiParam, Function, InstBuilder, MemFlagsData, Value, condcodes::IntCC, types},
+    isa::TargetIsa,
+};
+use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
+use std::collections::BTreeMap;
+
+// The frame consists only of consecutive u64 slots. The host call site owns it.
+pub(crate) const FLAGS: i32 = 16 * 8;
+pub(crate) const NEXT_PC: i32 = 17 * 8;
+pub(crate) const FAULT_DETAIL: i32 = 18 * 8;
+pub(crate) const DISPATCH: i64 = 0;
+pub(crate) const NONCANONICAL: i64 = 1;
+pub(crate) const ILLEGAL: i64 = 2;
+pub(crate) const TRAP: i64 = 3;
+
+pub(crate) fn into_function(
+    function: &mut Function,
+    isa: &dyn TargetIsa,
+    block: &IrBlock,
+) -> Result<(), CompileError> {
+    function.signature.call_conv = isa.default_call_conv();
+    function
+        .signature
+        .params
+        .push(AbiParam::new(isa.pointer_type()));
+    function.signature.returns.push(AbiParam::new(types::I32));
+    let mut context = FunctionBuilderContext::new();
+    let mut builder = FunctionBuilder::new(function, &mut context);
+    let entry = builder.create_block();
+    builder.append_block_params_for_function_params(entry);
+    builder.switch_to_block(entry);
+    let frame = builder.block_params(entry)[0];
+    let mut lowering = Lowering {
+        builder,
+        frame,
+        values: BTreeMap::new(),
+        pc: block.span.start,
+    };
+    for instruction in &block.instructions {
+        lowering.instruction(instruction.op)?;
+    }
+    lowering.exit(&block.exit)?;
+    lowering.builder.seal_all_blocks();
+    lowering.builder.finalize(isa.frontend_config());
+    Ok(())
+}
+
+/// Scalar values are held in I64 with unused upper bits cleared.
+#[derive(Clone, Copy)]
+struct Scalar {
+    value: Value,
+    width: u32,
+}
+
+struct Lowering<'a> {
+    builder: FunctionBuilder<'a>,
+    frame: Value,
+    values: BTreeMap<ValueId, Scalar>,
+    pc: GuestAddress,
+}
+
+impl Lowering<'_> {
+    fn unsupported(&self, operation: &'static str) -> CompileError {
+        CompileError::UnsupportedOperation {
+            pc: self.pc,
+            operation,
+        }
+    }
+
+    fn instruction(&mut self, op: Op) -> Result<(), CompileError> {
+        let (out, value, width) = match op {
+            Op::RequireFeature(_) => return Ok(()),
+            Op::Const { out, ty, bits } => {
+                match ty {
+                    Type::I1
+                    | Type::I8
+                    | Type::I16
+                    | Type::I32
+                    | Type::I64
+                    | Type::GuestAddress => (),
+                    _ => return Err(self.unsupported("constant type")),
+                }
+                (out, self.immediate(bits as i64), ty.bit_width())
+            }
+            Op::Int { out, op, lhs, rhs } => {
+                let lhs = self.values[&lhs];
+                let rhs = self.values[&rhs].value;
+                let ins = self.builder.ins();
+                let value = match op {
+                    IntOp::Add => ins.iadd(lhs.value, rhs),
+                    IntOp::Sub => ins.isub(lhs.value, rhs),
+                    IntOp::Mul => ins.imul(lhs.value, rhs),
+                    IntOp::And => ins.band(lhs.value, rhs),
+                    IntOp::Or => ins.bor(lhs.value, rhs),
+                    IntOp::Xor => ins.bxor(lhs.value, rhs),
+                };
+                (out, value, lhs.width)
+            }
+            Op::Compare {
+                out,
+                predicate,
+                lhs,
+                rhs,
+            } => {
+                let mut lhs = self.values[&lhs];
+                let mut rhs = self.values[&rhs];
+                let condition = match predicate {
+                    IntPredicate::Eq => IntCC::Equal,
+                    IntPredicate::Ne => IntCC::NotEqual,
+                    IntPredicate::SignedLt => IntCC::SignedLessThan,
+                    IntPredicate::SignedLe => IntCC::SignedLessThanOrEqual,
+                    IntPredicate::UnsignedLt => IntCC::UnsignedLessThan,
+                    IntPredicate::UnsignedLe => IntCC::UnsignedLessThanOrEqual,
+                };
+                if matches!(predicate, IntPredicate::SignedLt | IntPredicate::SignedLe) {
+                    lhs.value = self.signed(lhs);
+                    rhs.value = self.signed(rhs);
+                }
+                let flag = self.builder.ins().icmp(condition, lhs.value, rhs.value);
+                (out, self.builder.ins().uextend(types::I64, flag), 1)
+            }
+            Op::Shift {
+                out,
+                op,
+                value,
+                count,
+                rule,
+            } => {
+                let value = self.values[&value];
+                let count = self.values[&count].value;
+                (out, self.shift(value, count, op, rule), value.width)
+            }
+            Op::Select {
+                out,
+                condition,
+                yes,
+                no,
+            } => {
+                let flag = self.values[&condition].value;
+                let yes = self.values[&yes];
+                let no = self.values[&no].value;
+                (
+                    out,
+                    self.builder.ins().select(flag, yes.value, no),
+                    yes.width,
+                )
+            }
+            Op::IntToAddress { out, value } | Op::AddressToInt { out, value } => {
+                (out, self.values[&value].value, 64)
+            }
+            Op::CheckTarget {
+                address,
+                when,
+                constraint: AddressConstraint::Canonical48,
+            } => {
+                let address = self.values[&address].value;
+                let extended = self.signed(Scalar {
+                    value: address,
+                    width: 48,
+                });
+                let mut invalid = self.builder.ins().icmp(IntCC::NotEqual, address, extended);
+                if let Some(flag) = when {
+                    let taken = self
+                        .builder
+                        .ins()
+                        .ireduce(types::I8, self.values[&flag].value);
+                    invalid = self.builder.ins().band(invalid, taken);
+                }
+                let fault = self.builder.create_block();
+                let success = self.builder.create_block();
+                self.builder.ins().brif(invalid, fault, &[], success, &[]);
+                self.builder.switch_to_block(fault);
+                self.store(FAULT_DETAIL, address);
+                self.status(NONCANONICAL);
+                self.builder.switch_to_block(success);
+                return Ok(());
+            }
+            Op::ReadRegister { out, register } => {
+                let offset = self.register_offset(register)?;
+                let value = self.builder.ins().load(
+                    types::I64,
+                    MemFlagsData::trusted(),
+                    self.frame,
+                    offset,
+                );
+                (out, value, 64)
+            }
+            Op::WriteRegister { register, value } => {
+                let offset = self.register_offset(register)?;
+                self.store(offset, self.values[&value].value);
+                return Ok(());
+            }
+            _ => return Err(self.unsupported("IR operation")),
+        };
+        let value = self.mask(value, width);
+        self.values.insert(out, Scalar { value, width });
+        Ok(())
+    }
+
+    fn immediate(&mut self, bits: i64) -> Value {
+        self.builder.ins().iconst(types::I64, bits)
+    }
+
+    fn signed(&mut self, scalar: Scalar) -> Value {
+        if scalar.width == 64 {
+            return scalar.value;
+        }
+        let padding = i64::from(64 - scalar.width);
+        let shifted = self.builder.ins().ishl_imm_u(scalar.value, padding);
+        self.builder.ins().sshr_imm_u(shifted, padding)
+    }
+
+    fn mask(&mut self, value: Value, width: u32) -> Value {
+        if width == 64 {
+            value
+        } else {
+            self.builder.ins().band_imm_u(value, (1_i64 << width) - 1)
+        }
+    }
+
+    fn shift(&mut self, scalar: Scalar, count: Value, op: ShiftOp, rule: ShiftCount) -> Value {
+        let width = i64::from(scalar.width);
+        let count = self.builder.ins().band_imm_u(
+            count,
+            match rule {
+                ShiftCount::Mask5 => 31,
+                ShiftCount::Mask6 => 63,
+                ShiftCount::ModuloWidth => width - 1,
+            },
+        );
+        let value = scalar.value;
+        match op {
+            ShiftOp::Left | ShiftOp::LogicalRight => {
+                let shifted = if op == ShiftOp::Left {
+                    self.builder.ins().ishl(value, count)
+                } else {
+                    self.builder.ins().ushr(value, count)
+                };
+                let oversized =
+                    self.builder
+                        .ins()
+                        .icmp_imm_u(IntCC::UnsignedGreaterThanOrEqual, count, width);
+                let zero = self.immediate(0);
+                self.builder.ins().select(oversized, zero, shifted)
+            }
+            ShiftOp::ArithmeticRight => {
+                let limit = self.immediate(width - 1);
+                let count = self.builder.ins().umin(count, limit);
+                let extended = self.signed(scalar);
+                self.builder.ins().sshr(extended, count)
+            }
+            ShiftOp::RotateLeft | ShiftOp::RotateRight => {
+                let count = self.builder.ins().band_imm_u(count, width - 1);
+                let width = self.immediate(width);
+                let inverse = self.builder.ins().isub(width, count);
+                let (left_count, right_count) = if op == ShiftOp::RotateLeft {
+                    (count, inverse)
+                } else {
+                    (inverse, count)
+                };
+                let left = self.builder.ins().ishl(value, left_count);
+                let right = self.builder.ins().ushr(value, right_count);
+                self.builder.ins().bor(left, right)
+            }
+        }
+    }
+
+    fn register_offset(&self, register: Register) -> Result<i32, CompileError> {
+        match register {
+            Register::X86(X86Reg::Gpr(index)) => Ok(i32::from(index) * 8),
+            Register::X86(X86Reg::Rflags) => Ok(FLAGS),
+            _ => Err(self.unsupported("register")),
+        }
+    }
+
+    fn store(&mut self, offset: i32, value: Value) {
+        self.builder
+            .ins()
+            .store(MemFlagsData::trusted(), value, self.frame, offset);
+    }
+
+    fn status(&mut self, code: i64) {
+        let status = self.builder.ins().iconst(types::I32, code);
+        self.builder.ins().return_(&[status]);
+    }
+
+    fn exit(&mut self, exit: &Exit) -> Result<(), CompileError> {
+        match exit {
+            Exit::NextPc(next) => {
+                self.store(NEXT_PC, self.values[next].value);
+                self.status(DISPATCH);
+            }
+            Exit::Fault(FaultClass::IllegalInstruction) => self.status(ILLEGAL),
+            Exit::Trap { code } | Exit::Fault(FaultClass::Trap(code)) => {
+                let detail = self.immediate(i64::from(*code));
+                self.store(FAULT_DETAIL, detail);
+                self.status(TRAP);
+            }
+            _ => return Err(self.unsupported("block exit")),
+        }
+        Ok(())
+    }
+}

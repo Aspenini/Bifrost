@@ -56,6 +56,17 @@ fn allowed(package: &str) -> &'static [&'static str] {
     match package {
         "bifrost-memory" | "bifrost-executor" | "bifrost-host" | "bifrost-ir" => &["bifrost-core"],
         "bifrost-codegen" => &["bifrost-core", "bifrost-ir"],
+        "bifrost-codegen-clif" => &[
+            "bifrost-core",
+            "bifrost-ir",
+            "bifrost-codegen",
+            "bifrost-decoder-x86",
+            "bifrost-lifter-x86",
+            "bifrost-testkit",
+            "cranelift-codegen",
+            "cranelift-frontend",
+            "cranelift-native",
+        ],
         "bifrost-interpreter" => &[
             "bifrost-core",
             "bifrost-executor",
