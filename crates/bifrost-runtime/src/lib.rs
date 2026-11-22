@@ -9,7 +9,7 @@ use std::fmt;
 pub use bifrost_core as core;
 pub use bifrost_ir as ir;
 pub use bifrost_memory as memory;
-#[cfg(feature = "linux-elf")]
+#[cfg(any(feature = "linux-elf", feature = "windows-pe"))]
 pub mod process;
 #[cfg(feature = "abi-bridge")]
 pub use {bifrost_abi as abi, bifrost_bridge as bridge};
@@ -225,13 +225,24 @@ impl Default for RuntimeProfile {
             ),
             ("os-linux", "enable os-linux", cfg!(feature = "os-linux")),
             ("linux-elf", "enable linux-elf", cfg!(feature = "linux-elf")),
+            ("loader-pe", "enable loader-pe", cfg!(feature = "loader-pe")),
+            (
+                "os-windows",
+                "enable os-windows",
+                cfg!(feature = "os-windows"),
+            ),
+            (
+                "windows-pe",
+                "enable windows-pe",
+                cfg!(feature = "windows-pe"),
+            ),
         ] {
             let record = if available {
                 Capability::implemented(
                     id,
                     true,
                     SupportLevel::Partial,
-                    "static Linux x86-64 process profile",
+                    "limited x86-64 executable profile",
                 )
                 .expect("implemented support")
             } else {
@@ -242,8 +253,6 @@ impl Default for RuntimeProfile {
                 .expect("unique Linux capability");
         }
         for (id, compiled) in [
-            ("loader-pe", cfg!(feature = "loader-pe")),
-            ("os-windows", cfg!(feature = "os-windows")),
             ("host-windows", cfg!(feature = "host-windows")),
             ("host-linux", cfg!(feature = "host-linux")),
             ("native-execution", false),

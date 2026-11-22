@@ -62,6 +62,7 @@ pub enum Operation {
         target: GuestAddress,
     },
     Call(GuestAddress),
+    CallIndirect(Operand),
     Return,
     Ud2,
     Unsupported {
@@ -240,6 +241,7 @@ fn classify(inst: &Instruction, bytes: &[u8]) -> Option<Operation> {
         Jl_rel8_64 | Jl_rel32_64 => branch(Some(Condition::Less)),
         Jge_rel8_64 | Jge_rel32_64 => branch(Some(Condition::GreaterOrEqual)),
         Call_rel32_64 => Operation::Call(GuestAddress(inst.near_branch64())),
+        Call_rm64 => Operation::CallIndirect(operand(inst, 0)?),
         Retnq => Operation::Return,
         Ud2 => Operation::Ud2,
         _ => return None,

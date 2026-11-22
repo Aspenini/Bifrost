@@ -6,8 +6,12 @@ use bifrost_core::{
 };
 use bifrost_loader::LoadError;
 pub use bifrost_loader::{Format, Metadata};
+#[cfg(feature = "linux-elf")]
 pub use bifrost_os_linux::{Io, Vfs};
+#[cfg(feature = "linux-elf")]
 use bifrost_os_linux::{Linux, SyscallExit, UnsupportedSyscall};
+#[cfg(feature = "windows-pe")]
+pub use bifrost_os_windows::{ApiPolicy, Io as WindowsIo};
 use std::fmt;
 
 #[derive(Clone, Copy, Debug)]
@@ -29,7 +33,15 @@ impl Default for RunOptions {
 pub enum RunError {
     Load(LoadError),
     Execution(ExecutionError),
+    #[cfg(feature = "linux-elf")]
     Syscall(UnsupportedSyscall),
+    #[cfg(feature = "windows-pe")]
+    Windows(bifrost_os_windows::ApiError),
+    #[cfg(feature = "windows-pe")]
+    Import {
+        module: String,
+        symbol: String,
+    },
     Mode(crate::UnsupportedExecutionMode),
     Fault(GuestFault),
     Budget,
@@ -40,7 +52,12 @@ impl fmt::Display for RunError {
         match self {
             Self::Load(error) => error.fmt(f),
             Self::Execution(error) => error.fmt(f),
+            #[cfg(feature = "linux-elf")]
             Self::Syscall(error) => error.fmt(f),
+            #[cfg(feature = "windows-pe")]
+            Self::Windows(error) => error.fmt(f),
+            #[cfg(feature = "windows-pe")]
+            Self::Import { module, symbol } => write!(f, "unsupported PE import {module}!{symbol}"),
             Self::Mode(error) => error.fmt(f),
             Self::Fault(fault) => write!(
                 f,
@@ -65,9 +82,69 @@ impl From<ExecutionError> for RunError {
 }
 
 pub fn inspect(bytes: &[u8]) -> Result<Metadata, LoadError> {
-    Ok(bifrost_loader_elf::parse(bytes)?.image.metadata)
+    #[cfg(feature = "linux-elf")]
+    if bytes.starts_with(b"\x7fELF") {
+        return Ok(bifrost_loader_elf::parse(bytes)?.image.metadata);
+    }
+    #[cfg(feature = "windows-pe")]
+    if bytes.starts_with(b"MZ") {
+        return Ok(bifrost_loader_pe::parse(bytes)?.image.metadata);
+    }
+    Err(LoadError::Unsupported(
+        "unknown or disabled executable format",
+    ))
 }
 
+#[cfg(feature = "windows-pe")]
+pub fn inspect_pe(bytes: &[u8]) -> Result<bifrost_loader_pe::Pe<'_>, LoadError> {
+    bifrost_loader_pe::parse(bytes)
+}
+
+#[cfg(feature = "windows-pe")]
+pub fn run_windows(
+    bytes: &[u8],
+    io: WindowsIo<'_>,
+    policy: ApiPolicy,
+    options: RunOptions,
+) -> Result<u32, RunError> {
+    use bifrost_os_windows::{ApiAction, RETURN_PC, STUB_BASE, Windows};
+    let pe = bifrost_loader_pe::parse(bytes)?;
+    let targets = pe
+        .imports
+        .iter()
+        .map(|import| {
+            bifrost_os_windows::resolve(import.module, import.symbol).ok_or_else(|| {
+                RunError::Import {
+                    module: import.module.into(),
+                    symbol: import.symbol.into(),
+                }
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let (mut memory, state) = pe.start(&targets, RETURN_PC)?;
+    memory
+        .map(
+            bifrost_core::GuestAddress(STUB_BASE),
+            bifrost_loader::PAGE,
+            bifrost_core::Protection::Guard,
+        )
+        .map_err(LoadError::from)?;
+    let mut windows = Windows::new(io, policy, &targets).map_err(RunError::Windows)?;
+    execute(&mut memory, state, options, |thread, memory| {
+        Ok(
+            match windows
+                .dispatch(&mut thread.cpu, memory)
+                .map_err(RunError::Windows)?
+            {
+                ApiAction::Step => Action::Step,
+                ApiAction::Returned => Action::Continue,
+                ApiAction::Exit(status) => Action::Exit(status),
+            },
+        )
+    })
+}
+
+#[cfg(feature = "linux-elf")]
 pub fn run_linux<'a>(
     bytes: &[u8],
     args: &[&[u8]],

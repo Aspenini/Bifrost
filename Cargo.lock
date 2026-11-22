@@ -222,6 +222,11 @@ version = "0.1.0"
 [[package]]
 name = "bifrost-loader-pe"
 version = "0.1.0"
+dependencies = [
+ "bifrost-core",
+ "bifrost-loader",
+ "bifrost-memory",
+]
 
 [[package]]
 name = "bifrost-memory"
@@ -246,6 +251,11 @@ version = "0.1.0"
 [[package]]
 name = "bifrost-os-windows"
 version = "0.1.0"
+dependencies = [
+ "bifrost-abi",
+ "bifrost-core",
+ "bifrost-host-windows",
+]
 
 [[package]]
 name = "bifrost-runtime"

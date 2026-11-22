@@ -1,26 +1,25 @@
 use bifrost_runtime::{
     RuntimeProfile,
     core::{CapabilityProvider, ExecMode},
-    process::{self, Io, RunOptions, Vfs},
+    process::{self, ApiPolicy, Io, RunOptions, Vfs, WindowsIo},
 };
 use std::{
     ffi::OsString,
     fs::File,
     io::{self, Read, Write},
     path::Path,
-    process::ExitCode,
 };
 
-const USAGE: &str = "Usage: bifrost capabilities | inspect FILE | run [--exec auto|interp|jit] [--mount /guest=HOST] FILE [-- ARGS...]";
+const USAGE: &str = "Usage: bifrost capabilities | inspect FILE | run [--exec auto|interp|jit] [--api auto|portable|native] [--mount /guest=HOST] FILE [-- ARGS...]";
 const MAX_FILE: u64 = 64 * 1024 * 1024;
 type Error = Box<dyn std::error::Error>;
 
-fn main() -> ExitCode {
+fn main() {
     match command(std::env::args_os().skip(1).collect()) {
-        Ok(status) => ExitCode::from(status as u8),
+        Ok(status) => std::process::exit(status as i32),
         Err(error) => {
             eprintln!("bifrost: {error}");
-            ExitCode::from(1)
+            std::process::exit(1);
         }
     }
 }
@@ -31,11 +30,17 @@ fn command(args: Vec<OsString>) -> Result<u32, Error> {
         [flag] if flag == "--help" || flag == "-h" => println!("{USAGE}"),
         [command] if command == "capabilities" => capabilities(),
         [command, path] if command == "inspect" => {
-            let metadata = process::inspect(&read_file(Path::new(path))?)?;
+            let image = read_file(Path::new(path))?;
+            let metadata = process::inspect(&image)?;
             println!(
                 "{:?} {:?} entry {:#x}",
                 metadata.format, metadata.isa, metadata.entry.0
             );
+            if image.starts_with(b"MZ") {
+                for import in process::inspect_pe(&image)?.imports {
+                    println!("  {}!{}", import.module, import.symbol);
+                }
+            }
         }
         [command, rest @ ..] if command == "run" => return run(rest),
         _ => return Err(USAGE.into()),
@@ -78,6 +83,8 @@ fn read_file(path: &Path) -> Result<Vec<u8>, Error> {
 fn run(args: &[OsString]) -> Result<u32, Error> {
     let mut options = RunOptions::default();
     let mut vfs = Vfs::default();
+    let mut mounted = false;
+    let mut api = None;
     let mut args = args.iter();
     let path = loop {
         let next = args.next().ok_or(USAGE)?;
@@ -88,6 +95,13 @@ fn run(args: &[OsString]) -> Result<u32, Error> {
                 Some("jit") => ExecMode::Jit,
                 _ => return Err("expected --exec auto, interp or jit".into()),
             };
+        } else if next == "--api" {
+            api = Some(match args.next().and_then(|word| word.to_str()) {
+                Some("auto") => ApiPolicy::Auto,
+                Some("portable") => ApiPolicy::Portable,
+                Some("native") => ApiPolicy::Native,
+                _ => return Err("expected --api auto, portable or native".into()),
+            });
         } else if next == "--mount" {
             let (guest, host) = args
                 .next()
@@ -95,6 +109,7 @@ fn run(args: &[OsString]) -> Result<u32, Error> {
                 .and_then(|word| word.split_once('='))
                 .ok_or("expected --mount /guest=HOST")?;
             vfs.mount(guest.as_bytes(), read_file(Path::new(host))?)?;
+            mounted = true;
         } else if next == "--" {
             break args.next().ok_or(USAGE)?;
         } else if next.to_string_lossy().starts_with('-') {
@@ -113,18 +128,36 @@ fn run(args: &[OsString]) -> Result<u32, Error> {
     let argv: Vec<_> = guest_args.iter().map(|arg| arg.as_bytes()).collect();
     let image = read_file(Path::new(path))?;
     let (mut stdout, mut stderr) = (io::stdout().lock(), io::stderr().lock());
-    let status = process::run_linux(
-        &image,
-        &argv,
-        &[],
-        Io {
-            input: &[],
-            stdout: &mut stdout,
-            stderr: &mut stderr,
-        },
-        &vfs,
-        options,
-    );
+    let status = if image.starts_with(b"MZ") {
+        if mounted || argv.len() > 1 {
+            return Err("PE execution currently accepts neither mounts nor guest arguments".into());
+        }
+        process::run_windows(
+            &image,
+            WindowsIo {
+                stdout: &mut stdout,
+                stderr: &mut stderr,
+            },
+            api.unwrap_or(ApiPolicy::Auto),
+            options,
+        )
+    } else {
+        if api.is_some() {
+            return Err("--api applies to Windows PE images".into());
+        }
+        process::run_linux(
+            &image,
+            &argv,
+            &[],
+            Io {
+                input: &[],
+                stdout: &mut stdout,
+                stderr: &mut stderr,
+            },
+            &vfs,
+            options,
+        )
+    };
     stdout.flush()?;
     stderr.flush()?;
     Ok(status?)

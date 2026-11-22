@@ -145,14 +145,12 @@ impl X86Lifter {
             }
             Operation::Call(target) => {
                 let target = ir.address(target);
-                ir.check_target(target, None);
-                let stack = ir.read(gpr(4));
-                let updated = ir.with_immediate(IntOp::Sub, stack, 8);
-                let address = ir.int_to_address(updated);
-                let return_pc = ir.integer(next.0);
-                ir.store(address, return_pc);
-                ir.write(gpr(4), updated);
-                Exit::NextPc(target)
+                ir.call(target, next)
+            }
+            Operation::CallIndirect(operand) => {
+                let target = ir.operand(operand, next);
+                let target = ir.int_to_address(target);
+                ir.call(target, next)
             }
             Operation::Return => {
                 let stack = ir.read(gpr(4));
@@ -211,6 +209,16 @@ struct Builder {
 }
 
 impl Builder {
+    fn call(&mut self, target: ValueId, next: GuestAddress) -> Exit {
+        self.check_target(target, None);
+        let stack = self.read(gpr(4));
+        let updated = self.with_immediate(IntOp::Sub, stack, 8);
+        let address = self.int_to_address(updated);
+        let return_pc = self.integer(next.0);
+        self.store(address, return_pc);
+        self.write(gpr(4), updated);
+        Exit::NextPc(target)
+    }
     fn emit(&mut self, op: Op) {
         self.instructions.push(Instruction { pc: self.pc, op });
     }
