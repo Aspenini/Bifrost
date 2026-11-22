@@ -55,6 +55,13 @@ fn allowed(package: &str) -> &'static [&'static str] {
     match package {
         "bifrost-memory" | "bifrost-executor" | "bifrost-host" | "bifrost-ir" => &["bifrost-core"],
         "bifrost-codegen" => &["bifrost-core", "bifrost-ir"],
+        "bifrost-abi" => &["bifrost-core"],
+        "bifrost-bridge" => &[
+            "bifrost-abi",
+            "bifrost-core",
+            "bifrost-memory",
+            "bifrost-testkit",
+        ],
         "bifrost-codegen-clif" => &[
             "bifrost-core",
             "bifrost-host",

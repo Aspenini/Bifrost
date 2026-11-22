@@ -6,5 +6,13 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+[dependencies]
+bifrost-abi.workspace = true
+bifrost-core.workspace = true
+
+[dev-dependencies]
+bifrost-memory.workspace = true
+bifrost-testkit.workspace = true
+
 [lints]
 workspace = true
