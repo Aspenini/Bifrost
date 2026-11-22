@@ -1,0 +1,40 @@
+[package]
+name = "bifrost-runtime"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[features]
+default = []
+guest-x86_64 = ["dep:bifrost-decoder-x86", "dep:bifrost-lifter-x86"]
+guest-aarch64 = ["dep:bifrost-decoder-arm64", "dep:bifrost-lifter-arm64"]
+interp = ["dep:bifrost-interpreter"]
+jit-cranelift = ["dep:bifrost-codegen-clif"]
+loader-elf = ["dep:bifrost-loader-elf"]
+loader-pe = ["dep:bifrost-loader-pe"]
+os-linux = ["dep:bifrost-os-linux"]
+os-windows = ["dep:bifrost-os-windows"]
+host-windows = ["dep:bifrost-host-windows"]
+host-linux = ["dep:bifrost-host-linux"]
+
+[dependencies]
+bifrost-core.workspace = true
+bifrost-ir.workspace = true
+bifrost-memory.workspace = true
+bifrost-decoder-x86 = { workspace = true, optional = true }
+bifrost-lifter-x86 = { workspace = true, optional = true }
+bifrost-decoder-arm64 = { workspace = true, optional = true }
+bifrost-lifter-arm64 = { workspace = true, optional = true }
+bifrost-interpreter = { workspace = true, optional = true }
+bifrost-codegen-clif = { workspace = true, optional = true }
+bifrost-loader-elf = { workspace = true, optional = true }
+bifrost-loader-pe = { workspace = true, optional = true }
+bifrost-os-linux = { workspace = true, optional = true }
+bifrost-os-windows = { workspace = true, optional = true }
+bifrost-host-windows = { workspace = true, optional = true }
+bifrost-host-linux = { workspace = true, optional = true }
+
+[lints]
+workspace = true

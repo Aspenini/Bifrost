@@ -1,0 +1,107 @@
+use bifrost_core::{AccessKind, GuestAddress as Addr};
+use bifrost_memory::{AddressSpace, GuestMemory, GuestMemoryRead, MemoryError, Protection};
+
+#[test]
+fn validates_the_entire_access_before_copying() {
+    let mut memory = AddressSpace::new(4096, 3).unwrap();
+    memory
+        .map(Addr(0x1000), 4096, Protection::ReadWrite)
+        .unwrap();
+    memory.map(Addr(0x2000), 4096, Protection::Guard).unwrap();
+    let generation = memory.generation_at(Addr(0x1000));
+    let denied = |access| MemoryError::Denied {
+        address: Addr(0x2000),
+        access,
+        protection: Protection::Guard,
+    };
+
+    assert_eq!(
+        memory.write(Addr(0x1fff), &[1, 2]),
+        Err(denied(AccessKind::Write))
+    );
+    assert_eq!(memory.generation_at(Addr(0x1000)), generation);
+    let mut bytes = [9, 9];
+    assert_eq!(
+        memory.read(Addr(0x1fff), &mut bytes),
+        Err(denied(AccessKind::Read))
+    );
+    assert_eq!(bytes, [9, 9]);
+    memory.read(Addr(0x1fff), &mut bytes[..1]).unwrap();
+    assert_eq!(bytes, [0, 9]);
+
+    memory
+        .protect(Addr(0x2000), 4096, Protection::ReadWrite)
+        .unwrap();
+    memory.write(Addr(0x1fff), &[1, 2]).unwrap();
+    memory.read(Addr(0x1fff), &mut bytes).unwrap();
+    assert_eq!(bytes, [1, 2]);
+    assert_eq!(
+        memory.generation_at(Addr(0x1000)),
+        memory.generation_at(Addr(0x2000))
+    );
+}
+
+#[test]
+fn distinguishes_fetch_and_access_and_advances_generations() {
+    let mut memory = AddressSpace::new(4096, 1).unwrap();
+    memory.map(Addr(0), 4096, Protection::ReadWrite).unwrap();
+    let loaded = memory.generation_at(Addr(0));
+    memory.write(Addr(7), &[0xcc]).unwrap();
+    let written = memory.generation_at(Addr(0));
+    let mut byte = [0];
+    assert!(memory.fetch(Addr(7), &mut byte).is_err());
+    memory.protect(Addr(0), 4096, Protection::Execute).unwrap();
+    let executable = memory.generation_at(Addr(0));
+    memory.fetch(Addr(7), &mut byte).unwrap();
+    assert_eq!(byte, [0xcc]);
+    assert!(memory.read(Addr(7), &mut byte).is_err());
+    assert!(memory.write(Addr(7), &[0]).is_err());
+
+    memory.unmap(Addr(0), 4096).unwrap();
+    assert_eq!(memory.generation_at(Addr(0)), None);
+    memory.map(Addr(0), 4096, Protection::ReadExecute).unwrap();
+    memory.fetch(Addr(7), &mut byte).unwrap();
+    assert_eq!(byte, [0]);
+    assert!(loaded < written && written < executable && executable < memory.generation_at(Addr(0)));
+}
+
+#[test]
+fn handles_the_top_address_and_rejects_invalid_regions_atomically() {
+    let mut memory = AddressSpace::new(16, 3).unwrap();
+    let last = Addr(u64::MAX);
+    let base = Addr(u64::MAX - 15);
+    memory.map(base, 16, Protection::ReadWrite).unwrap();
+    memory.write(last, &[7]).unwrap();
+    assert_eq!(
+        memory.write(last, &[8, 9]),
+        Err(MemoryError::AddressOverflow(last))
+    );
+    assert_eq!(
+        memory.map(base, 32, Protection::ReadWrite),
+        Err(MemoryError::AddressOverflow(base))
+    );
+    assert_eq!(
+        memory.map(Addr(base.0 - 16), 32, Protection::ReadWrite),
+        Err(MemoryError::AlreadyMapped(base))
+    );
+    assert_eq!(memory.generation_at(Addr(base.0 - 16)), None);
+    assert_eq!(
+        memory.protect(Addr(base.0 - 16), 32, Protection::None),
+        Err(MemoryError::Unmapped(Addr(base.0 - 16)))
+    );
+    assert_eq!(
+        memory.unmap(Addr(base.0 - 16), 32),
+        Err(MemoryError::Unmapped(Addr(base.0 - 16)))
+    );
+    let mut byte = [0];
+    memory.read(last, &mut byte).unwrap();
+    assert_eq!(byte, [7]);
+    assert_eq!(
+        memory.map(Addr(0), 48, Protection::ReadWrite),
+        Err(MemoryError::PageLimit)
+    );
+    assert!(matches!(
+        memory.map(Addr(1), 16, Protection::ReadWrite),
+        Err(MemoryError::InvalidRegion { .. })
+    ));
+}

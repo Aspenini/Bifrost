@@ -1,0 +1,29 @@
+name: Rust CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      RUSTDOCFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - run: cargo fmt --all --check
+      - run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+      - run: cargo test --locked --workspace
+      - run: cargo test --locked --workspace --all-features
+      - run: cargo doc --locked --workspace --all-features --no-deps
+      - run: cargo check --locked -p bifrost-runtime --no-default-features
+      - run: cargo run --locked -p xtask -- check-deps
+      - run: cargo run --locked -p bifrost-example-verify-ir
+      - run: cargo run --locked -p bifrost-cli -- capabilities

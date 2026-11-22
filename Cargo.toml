@@ -1,0 +1,74 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/bifrost-core",
+    "crates/bifrost-ir",
+    "crates/bifrost-decoder-x86",
+    "crates/bifrost-lifter-x86",
+    "crates/bifrost-decoder-arm64",
+    "crates/bifrost-lifter-arm64",
+    "crates/bifrost-interpreter",
+    "crates/bifrost-codegen",
+    "crates/bifrost-codegen-clif",
+    "crates/bifrost-executor",
+    "crates/bifrost-memory",
+    "crates/bifrost-abi",
+    "crates/bifrost-bridge",
+    "crates/bifrost-loader",
+    "crates/bifrost-loader-elf",
+    "crates/bifrost-loader-pe",
+    "crates/bifrost-loader-macho",
+    "crates/bifrost-vfs",
+    "crates/bifrost-host",
+    "crates/bifrost-host-windows",
+    "crates/bifrost-host-linux",
+    "crates/bifrost-host-macos",
+    "crates/bifrost-os-linux",
+    "crates/bifrost-os-windows",
+    "crates/bifrost-os-macos",
+    "crates/bifrost-runtime",
+    "crates/bifrost-ffi",
+    "crates/bifrost-testkit",
+    "apps/bifrost-cli",
+    "examples/verify-ir",
+    "xtask",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97.1"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+bifrost-core = { path = "crates/bifrost-core", version = "0.1.0", default-features = false }
+bifrost-ir = { path = "crates/bifrost-ir", version = "0.1.0", default-features = false }
+bifrost-decoder-x86 = { path = "crates/bifrost-decoder-x86", version = "0.1.0", default-features = false }
+bifrost-lifter-x86 = { path = "crates/bifrost-lifter-x86", version = "0.1.0", default-features = false }
+bifrost-decoder-arm64 = { path = "crates/bifrost-decoder-arm64", version = "0.1.0", default-features = false }
+bifrost-lifter-arm64 = { path = "crates/bifrost-lifter-arm64", version = "0.1.0", default-features = false }
+bifrost-interpreter = { path = "crates/bifrost-interpreter", version = "0.1.0", default-features = false }
+bifrost-codegen = { path = "crates/bifrost-codegen", version = "0.1.0", default-features = false }
+bifrost-codegen-clif = { path = "crates/bifrost-codegen-clif", version = "0.1.0", default-features = false }
+bifrost-executor = { path = "crates/bifrost-executor", version = "0.1.0", default-features = false }
+bifrost-memory = { path = "crates/bifrost-memory", version = "0.1.0", default-features = false }
+bifrost-abi = { path = "crates/bifrost-abi", version = "0.1.0", default-features = false }
+bifrost-bridge = { path = "crates/bifrost-bridge", version = "0.1.0", default-features = false }
+bifrost-loader = { path = "crates/bifrost-loader", version = "0.1.0", default-features = false }
+bifrost-loader-elf = { path = "crates/bifrost-loader-elf", version = "0.1.0", default-features = false }
+bifrost-loader-pe = { path = "crates/bifrost-loader-pe", version = "0.1.0", default-features = false }
+bifrost-loader-macho = { path = "crates/bifrost-loader-macho", version = "0.1.0", default-features = false }
+bifrost-vfs = { path = "crates/bifrost-vfs", version = "0.1.0", default-features = false }
+bifrost-host = { path = "crates/bifrost-host", version = "0.1.0", default-features = false }
+bifrost-host-windows = { path = "crates/bifrost-host-windows", version = "0.1.0", default-features = false }
+bifrost-host-linux = { path = "crates/bifrost-host-linux", version = "0.1.0", default-features = false }
+bifrost-host-macos = { path = "crates/bifrost-host-macos", version = "0.1.0", default-features = false }
+bifrost-os-linux = { path = "crates/bifrost-os-linux", version = "0.1.0", default-features = false }
+bifrost-os-windows = { path = "crates/bifrost-os-windows", version = "0.1.0", default-features = false }
+bifrost-os-macos = { path = "crates/bifrost-os-macos", version = "0.1.0", default-features = false }
+bifrost-runtime = { path = "crates/bifrost-runtime", version = "0.1.0", default-features = false }
+bifrost-ffi = { path = "crates/bifrost-ffi", version = "0.1.0", default-features = false }
+bifrost-testkit = { path = "crates/bifrost-testkit", version = "0.1.0", default-features = false }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
