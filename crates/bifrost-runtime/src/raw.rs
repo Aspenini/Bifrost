@@ -274,3 +274,14 @@ impl Executor for RawInterpreter<'_> {
         run_steps(self.isa, thread, budget, |thread| self.step(thread))
     }
 }
+
+#[cfg(all(feature = "interp", feature = "abi-bridge"))]
+impl bifrost_bridge::BridgeBackend for RawInterpreter<'_> {
+    type Error = ExecutionError;
+    fn step(&mut self, thread: &mut GuestThread) -> Result<ExitReason, ExecutionError> {
+        RawInterpreter::step(self, thread)
+    }
+    fn memory(&mut self) -> &mut dyn bifrost_core::GuestMemory {
+        self.memory
+    }
+}

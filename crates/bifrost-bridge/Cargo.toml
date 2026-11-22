@@ -9,6 +9,7 @@ publish = false
 [dependencies]
 bifrost-abi.workspace = true
 bifrost-core.workspace = true
+bifrost-executor.workspace = true
 
 [dev-dependencies]
 bifrost-memory.workspace = true

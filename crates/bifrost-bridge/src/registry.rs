@@ -3,7 +3,7 @@ use bifrost_abi::AbiDescriptor;
 use bifrost_core::{CpuState, GuestAddress, GuestMemory};
 use std::{
     any::Any,
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     sync::Arc,
     sync::atomic::{AtomicU64, Ordering},
 };
@@ -26,6 +26,7 @@ pub struct NativeToken(pub u64);
 #[derive(Default)]
 struct Module {
     symbols: BTreeMap<String, GuestAddress>,
+    callbacks: BTreeSet<GuestAddress>,
 }
 
 struct Entry {
@@ -56,7 +57,12 @@ impl BridgeRegistry {
         if module.is_empty() || symbol.is_empty() {
             return Err(BridgeError::EmptyBindingName);
         }
-        if self.entries.contains_key(&address) {
+        if self.entries.contains_key(&address)
+            || self
+                .modules
+                .values()
+                .any(|module| module.callbacks.contains(&address))
+        {
             return Err(BridgeError::DuplicateEntry(address));
         }
         let namespace = self.modules.entry(module.into()).or_default();
@@ -83,6 +89,22 @@ impl BridgeRegistry {
 
     pub fn contains(&self, address: GuestAddress) -> bool {
         self.entries.contains_key(&address)
+    }
+
+    pub fn allow_callback(
+        &mut self,
+        module: &str,
+        address: GuestAddress,
+    ) -> Result<(), BridgeError> {
+        if self.entries.contains_key(&address) {
+            return Err(BridgeError::DuplicateEntry(address));
+        }
+        self.modules
+            .get_mut(module)
+            .ok_or_else(|| BridgeError::UnknownModule(module.into()))?
+            .callbacks
+            .insert(address);
+        Ok(())
     }
 
     pub fn insert_handle<T: Any + Send + Sync>(
@@ -139,7 +161,7 @@ impl BridgeRegistry {
         memory: &mut dyn GuestMemory,
     ) -> Result<(), BridgeError> {
         let mut call = self.prepare(abi, cpu, memory)?;
-        let result = call.call_native()?;
+        let result = call.call_native(None)?;
         call.finish(cpu, memory, result)
     }
 
@@ -159,6 +181,19 @@ impl BridgeRegistry {
         if let Some(raw) = call.handle() {
             let token = self.resolve_handle::<NativeToken>(&entry.module, HandleId(raw))?;
             call.resolve_handle(token.0);
+        }
+        if let Some(callback) = call.callback_address() {
+            if !self.modules[&entry.module].callbacks.contains(&callback) {
+                return Err(BridgeError::DisallowedCallback(callback));
+            }
+            abi.validate_code_address(callback)?;
+            let mut bytes = [0; 4];
+            let width = if abi.isa == bifrost_core::GuestIsa::AArch64 {
+                4
+            } else {
+                1
+            };
+            memory.fetch(callback, &mut bytes[..width])?;
         }
         Ok(call)
     }

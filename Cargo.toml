@@ -32,6 +32,7 @@ members = [
     "apps/bifrost-cli",
     "examples/execute-raw-x86",
     "examples/execute-raw-arm64",
+    "examples/host-function-bridge",
     "examples/verify-ir",
     "tests/differential",
     "xtask",

@@ -116,6 +116,14 @@ fn aggregate_calls_use_direct_pairs_and_windows_hidden_buffers() {
 #[test]
 #[allow(unsafe_code)]
 fn buffer_copyback_requires_the_entire_guest_range_to_be_writable() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static CALLS: AtomicUsize = AtomicUsize::new(0);
+    unsafe extern "C" fn count_increment(bytes: *mut u8, len: usize) -> u64 {
+        CALLS.fetch_add(1, Ordering::Relaxed);
+        // SAFETY: The counted wrapper forwards the same buffer contract.
+        unsafe { native::increment_buffer(bytes, len) }
+    }
     if AbiDescriptor::native().is_none() {
         return;
     }
@@ -124,7 +132,7 @@ fn buffer_copyback_requires_the_entire_guest_range_to_be_writable() {
     memory.write(address, &[1, 2, 3, 4]).unwrap();
     // SAFETY: The reference library mutates exactly the staging slice during the call.
     let function = NativeFunction::Buffer(unsafe {
-        NativeBuffer::new(native::increment_buffer, BufferMode::InOut, 16)
+        NativeBuffer::new(count_increment, BufferMode::InOut, 16)
     });
     let mut registry = BridgeRegistry::default();
     registry
@@ -145,6 +153,7 @@ fn buffer_copyback_requires_the_entire_guest_range_to_be_writable() {
     ));
     assert_eq!(cpu, original);
     assert_eq!(memory.generation_at(address), generation);
+    assert_eq!(CALLS.load(Ordering::Relaxed), 0);
     let mut bytes = [0; 4];
     memory.read(address, &mut bytes).unwrap();
     assert_eq!(bytes, [1, 2, 3, 4]);
@@ -158,9 +167,11 @@ fn buffer_copyback_requires_the_entire_guest_range_to_be_writable() {
         registry.invoke(abi, &mut cpu, &mut memory),
         Err(BridgeError::BufferLimit { .. })
     ));
+    assert_eq!(CALLS.load(Ordering::Relaxed), 0);
     abi.write_word(&mut cpu, &mut memory, Location::Integer(1), 4)
         .unwrap();
     registry.invoke(abi, &mut cpu, &mut memory).unwrap();
+    assert_eq!(CALLS.load(Ordering::Relaxed), 1);
     memory.read(address, &mut bytes).unwrap();
     assert_eq!(bytes, [2, 3, 4, 5]);
     assert_eq!(

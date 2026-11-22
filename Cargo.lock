@@ -27,6 +27,7 @@ version = "0.1.0"
 dependencies = [
  "bifrost-abi",
  "bifrost-core",
+ "bifrost-executor",
  "bifrost-memory",
  "bifrost-testkit",
 ]
@@ -100,6 +101,14 @@ dependencies = [
 
 [[package]]
 name = "bifrost-example-execute-raw-x86"
+version = "0.1.0"
+dependencies = [
+ "bifrost-runtime",
+ "bifrost-testkit",
+]
+
+[[package]]
+name = "bifrost-example-host-function-bridge"
 version = "0.1.0"
 dependencies = [
  "bifrost-runtime",
@@ -228,6 +237,8 @@ version = "0.1.0"
 name = "bifrost-runtime"
 version = "0.1.0"
 dependencies = [
+ "bifrost-abi",
+ "bifrost-bridge",
  "bifrost-codegen",
  "bifrost-codegen-clif",
  "bifrost-core",

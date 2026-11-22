@@ -57,6 +57,7 @@ fn allowed(package: &str) -> &'static [&'static str] {
         "bifrost-codegen" => &["bifrost-core", "bifrost-ir"],
         "bifrost-abi" => &["bifrost-core"],
         "bifrost-bridge" => &[
+            "bifrost-executor",
             "bifrost-abi",
             "bifrost-core",
             "bifrost-memory",
@@ -100,10 +101,13 @@ fn allowed(package: &str) -> &'static [&'static str] {
         ],
         "bifrost-cli" => &["bifrost-runtime"],
         "bifrost-example-verify-ir" => &["bifrost-memory", "bifrost-testkit"],
+        "bifrost-example-host-function-bridge" => &["bifrost-runtime", "bifrost-testkit"],
         "bifrost-example-execute-raw-x86"
         | "bifrost-example-execute-raw-arm64"
         | "bifrost-differential" => &["bifrost-runtime", "bifrost-testkit"],
         "bifrost-runtime" => &[
+            "bifrost-abi",
+            "bifrost-bridge",
             "bifrost-core",
             "bifrost-ir",
             "bifrost-memory",

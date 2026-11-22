@@ -9,6 +9,19 @@ use std::fmt;
 pub use bifrost_core as core;
 pub use bifrost_ir as ir;
 pub use bifrost_memory as memory;
+#[cfg(feature = "abi-bridge")]
+pub use {bifrost_abi as abi, bifrost_bridge as bridge};
+
+fn bridge_host_available() -> bool {
+    #[cfg(feature = "abi-bridge")]
+    {
+        bifrost_abi::AbiDescriptor::native().is_some()
+    }
+    #[cfg(not(feature = "abi-bridge"))]
+    {
+        false
+    }
+}
 
 #[cfg(all(
     any(feature = "guest-x86_64", feature = "guest-aarch64"),
@@ -188,6 +201,20 @@ impl Default for RuntimeProfile {
             Capability::planned("jit-cranelift", false, "enable jit-cranelift")
         };
         capabilities.register(jit).expect("unique JIT capability");
+        let bridge = if cfg!(feature = "abi-bridge") {
+            Capability::implemented(
+                "abi-bridge",
+                bridge_host_available(),
+                SupportLevel::Partial,
+                "registered fixed-signature native calls and synchronous callbacks",
+            )
+            .expect("implemented support level")
+        } else {
+            Capability::planned("abi-bridge", false, "enable abi-bridge")
+        };
+        capabilities
+            .register(bridge)
+            .expect("unique bridge capability");
         for (id, compiled) in [
             ("loader-elf", cfg!(feature = "loader-elf")),
             ("loader-pe", cfg!(feature = "loader-pe")),

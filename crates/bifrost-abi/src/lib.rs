@@ -270,8 +270,6 @@ impl AbiDescriptor {
     pub const fn native() -> Option<&'static Self> {
         if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
             Some(&WIN_X64)
-        } else if cfg!(all(target_os = "windows", target_arch = "aarch64")) {
-            Some(&WIN_ARM64)
         } else if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
             Some(&SYSV)
         } else if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
@@ -379,6 +377,28 @@ impl AbiDescriptor {
         location: Location,
     ) -> Result<u64, AbiError> {
         self.check_state(cpu)?;
+        if let Location::Stack(offset) = location {
+            let mut bytes = [0; 8];
+            memory.read(self.stack_word(cpu.sp(), offset)?, &mut bytes)?;
+            Ok(u64::from_le_bytes(bytes))
+        } else {
+            self.read_result_register(cpu, location)
+        }
+    }
+
+    /// Reads a returned register without imposing callee-entry stack alignment.
+    pub fn read_result_register(
+        &self,
+        cpu: &CpuState,
+        location: Location,
+    ) -> Result<u64, AbiError> {
+        let actual = cpu.isa();
+        if actual != self.isa {
+            return Err(AbiError::IsaMismatch {
+                expected: self.isa,
+                actual,
+            });
+        }
         let result = match (cpu, location) {
             (CpuState::X86_64(state), Location::Integer(reg)) => {
                 state.gpr.get(usize::from(reg)).copied()
@@ -391,11 +411,6 @@ impl AbiDescriptor {
             }
             (CpuState::AArch64(state), Location::Float(reg)) => {
                 state.v.get(usize::from(reg)).map(|&bits| bits as u64)
-            }
-            (_, Location::Stack(offset)) => {
-                let mut bytes = [0; 8];
-                memory.read(self.stack_word(cpu.sp(), offset)?, &mut bytes)?;
-                return Ok(u64::from_le_bytes(bytes));
             }
             _ => None,
         };

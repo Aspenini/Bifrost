@@ -1,0 +1,17 @@
+[package]
+name = "bifrost-example-host-function-bridge"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[features]
+jit-cranelift = ["bifrost-runtime/jit-cranelift"]
+
+[dependencies]
+bifrost-runtime = { workspace = true, features = ["guest-x86_64", "guest-aarch64", "interp", "abi-bridge"] }
+bifrost-testkit.workspace = true
+
+[lints.rust]
+unsafe_code = "deny"

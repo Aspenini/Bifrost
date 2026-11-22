@@ -2,36 +2,47 @@
 
 #[allow(unsafe_code)]
 mod buffer;
+#[allow(unsafe_code)]
+mod callback;
+mod executor;
 mod registry;
 
 pub use buffer::{BufferMode, MAX_BUFFER_BYTES, NativeBuffer};
+pub use callback::{CallbackEntry, CallbackFunction, NativeCallback};
+pub use executor::{BridgeBackend, BridgeExecutor, CallbackStack};
 pub use registry::{BridgeRegistry, HandleId, NativeToken};
 
 use bifrost_abi::{
     AbiDescriptor, AbiError, Argument, ArgumentLocation, CallReturn, Location, Pair64,
     ResultLocation, Scalar,
 };
-use bifrost_core::{CpuState, GuestAddress, GuestMemory, MemoryError};
+use bifrost_core::{CpuState, GuestAddress, GuestFault, GuestMemory, MemoryError};
 use std::fmt;
 
 const WORD: Argument = Argument::Scalar(Scalar::U64);
+pub type NineWords = extern "C" fn(u64, u64, u64, u64, u64, u64, u64, u64, u64) -> u64;
 
 /// Each variant represents a compiler-checked C signature.
 #[derive(Clone, Copy)]
 #[non_exhaustive]
 pub enum NativeFunction {
     U64Binary(extern "C" fn(u64, u64) -> u64),
+    U64Nine(NineWords),
     I64Binary(extern "C" fn(i64, i64) -> i64),
     U64F64(extern "C" fn(u64, f64) -> f64),
     Pair(extern "C" fn(Pair64) -> Pair64),
     Buffer(NativeBuffer),
     HandleU64(extern "C" fn(u64, u64) -> u64),
+    Callback(NativeCallback),
 }
 
 impl NativeFunction {
     pub const fn signature(self) -> (&'static [Argument], Argument) {
         match self {
-            Self::U64Binary(_) | Self::Buffer(_) | Self::HandleU64(_) => (&[WORD, WORD], WORD),
+            Self::U64Nine(_) => (&[WORD; 9], WORD),
+            Self::U64Binary(_) | Self::Buffer(_) | Self::HandleU64(_) | Self::Callback(_) => {
+                (&[WORD, WORD], WORD)
+            }
             Self::I64Binary(_) => (
                 &[Argument::Scalar(Scalar::I64); 2],
                 Argument::Scalar(Scalar::I64),
@@ -52,7 +63,7 @@ impl NativeFunction {
         memory: &mut dyn GuestMemory,
     ) -> Result<(), BridgeError> {
         let mut call = PreparedCall::prepare(self, abi, cpu, memory)?;
-        let result = call.call_native()?;
+        let result = call.call_native(None)?;
         call.finish(cpu, memory, result)
     }
 }
@@ -67,6 +78,11 @@ pub(crate) struct PreparedCall<'a> {
 
 enum Input {
     Words(u64, u64),
+    Nine([u64; 9]),
+    Callback {
+        value: u64,
+        entry: GuestAddress,
+    },
     Pair(Pair64),
     Buffer {
         bytes: Vec<u8>,
@@ -115,6 +131,16 @@ impl<'a> PreparedCall<'a> {
             }
         };
         let input = match layout.arguments.as_slice() {
+            arguments if matches!(function, NativeFunction::U64Nine(_)) => {
+                let mut values = [0; 9];
+                for (value, location) in values.iter_mut().zip(arguments) {
+                    let ArgumentLocation::Word(location) = *location else {
+                        unreachable!("word signature")
+                    };
+                    *value = abi.read_word(cpu, memory, location)?;
+                }
+                Input::Nine(values)
+            }
             [ArgumentLocation::Pair([first, second])] => Input::Pair(Pair64 {
                 first: abi.read_word(cpu, memory, *first)?,
                 second: abi.read_word(cpu, memory, *second)?,
@@ -142,15 +168,19 @@ impl<'a> PreparedCall<'a> {
                                 requested: second,
                                 limit: binding.limit,
                             })?;
-                        let mut bytes = vec![0; len];
                         if len != 0 {
                             abi.validate_span(address, len)?;
                             if binding.mode.write() {
                                 memory.check_write(address, len)?;
                             }
-                            if binding.mode.read() {
-                                memory.read(address, &mut bytes)?;
-                            }
+                        }
+                        let mut bytes = Vec::new();
+                        bytes
+                            .try_reserve_exact(len)
+                            .map_err(|_| MemoryError::Allocation)?;
+                        bytes.resize(len, 0);
+                        if binding.mode.read() && len != 0 {
+                            memory.read(address, &mut bytes)?;
                         }
                         Input::Buffer {
                             bytes,
@@ -161,6 +191,10 @@ impl<'a> PreparedCall<'a> {
                         id: first,
                         value: second,
                         native: None,
+                    },
+                    NativeFunction::Callback(_) => Input::Callback {
+                        value: first,
+                        entry: GuestAddress(second),
                     },
                     _ => Input::Words(first, second),
                 }
@@ -189,9 +223,22 @@ impl<'a> PreparedCall<'a> {
         }
     }
 
-    pub(crate) fn call_native(&mut self) -> Result<NativeResult, BridgeError> {
+    pub(crate) fn callback_address(&self) -> Option<GuestAddress> {
+        match self.input {
+            Input::Callback { entry, .. } => Some(entry),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn call_native(
+        &mut self,
+        callback: Option<&mut GuestCallback<'_>>,
+    ) -> Result<NativeResult, BridgeError> {
         let value = match (self.function, &mut self.input) {
             (NativeFunction::U64Binary(call), Input::Words(a, b)) => call(*a, *b),
+            (NativeFunction::U64Nine(call), Input::Nine([a, b, c, d, e, f, g, h, i])) => {
+                call(*a, *b, *c, *d, *e, *f, *g, *h, *i)
+            }
             (NativeFunction::I64Binary(call), Input::Words(a, b)) => {
                 call(*a as i64, *b as i64) as u64
             }
@@ -204,6 +251,10 @@ impl<'a> PreparedCall<'a> {
             (NativeFunction::Buffer(call), Input::Buffer { bytes, .. }) => call.call(bytes),
             (NativeFunction::HandleU64(call), Input::Handle { id, value, native }) => {
                 call(native.ok_or(BridgeError::InvalidHandle(*id))?, *value)
+            }
+            (NativeFunction::Callback(call), Input::Callback { value, entry }) => {
+                let callback = callback.ok_or(BridgeError::CallbackUnavailable)?;
+                call.call(*value, &mut |argument| callback(*entry, argument))?
             }
             _ => unreachable!("prepared native schema"),
         };
@@ -242,6 +293,8 @@ impl<'a> PreparedCall<'a> {
     }
 }
 
+type GuestCallback<'a> = dyn FnMut(GuestAddress, u64) -> Result<u64, BridgeError> + 'a;
+
 fn check_pair(
     abi: &AbiDescriptor,
     address: GuestAddress,
@@ -269,6 +322,15 @@ pub enum BridgeError {
     HandleIdsExhausted,
     BufferLimit { requested: u64, limit: usize },
     MisalignedAggregate(GuestAddress),
+    DisallowedCallback(GuestAddress),
+    InvalidCallbackStack,
+    InvalidCallbackReturn,
+    CallbackUnavailable,
+    CallbackDepth,
+    CallbackBudget,
+    CallbackFault(GuestFault),
+    Backend(Box<dyn std::error::Error + Send + Sync>),
+    InvalidBackendExit,
 }
 
 impl fmt::Display for BridgeError {
@@ -298,6 +360,29 @@ impl fmt::Display for BridgeError {
             Self::MisalignedAggregate(address) => {
                 write!(f, "misaligned guest aggregate at {:#x}", address.0)
             }
+            Self::DisallowedCallback(address) => {
+                write!(f, "unregistered guest callback at {:#x}", address.0)
+            }
+            Self::InvalidCallbackStack => {
+                f.write_str("invalid reserved guest callback stack or return marker")
+            }
+            Self::InvalidCallbackReturn => {
+                f.write_str("guest callback returned with an invalid stack pointer")
+            }
+            Self::CallbackUnavailable => {
+                f.write_str("no guest callback executor or stack was configured")
+            }
+            Self::CallbackDepth => f.write_str("guest callback nesting limit reached"),
+            Self::CallbackBudget => f.write_str("guest callback exhausted the execution budget"),
+            Self::CallbackFault(fault) => write!(
+                f,
+                "guest callback fault {:?} at {:#x}",
+                fault.class, fault.pc.0
+            ),
+            Self::Backend(error) => error.fmt(f),
+            Self::InvalidBackendExit => {
+                f.write_str("guest backend returned an invalid step result")
+            }
         }
     }
 }
@@ -306,6 +391,7 @@ impl std::error::Error for BridgeError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Abi(error) => Some(error),
+            Self::Backend(error) => Some(error.as_ref()),
             _ => None,
         }
     }

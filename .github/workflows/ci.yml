@@ -32,4 +32,5 @@ jobs:
       - run: cargo run --locked -p bifrost-example-execute-raw-x86
       - run: cargo run --locked -p bifrost-example-execute-raw-x86 --features jit-cranelift
       - run: cargo run --locked -p bifrost-example-execute-raw-arm64 --features jit-cranelift
+      - run: cargo run --locked -p bifrost-example-host-function-bridge --features jit-cranelift
       - run: cargo run --locked -p bifrost-cli -- capabilities

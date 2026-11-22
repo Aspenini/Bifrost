@@ -12,6 +12,7 @@ Install Rust via rustup. The workspace selects its pinned toolchain automaticall
 cargo run --locked -p bifrost-example-execute-raw-x86
 cargo run --locked -p bifrost-example-execute-raw-x86 --features jit-cranelift
 cargo run --locked -p bifrost-example-execute-raw-arm64 --features jit-cranelift
+cargo run --locked -p bifrost-example-host-function-bridge --features jit-cranelift
 cargo run --locked -p bifrost-example-verify-ir
 cargo run --locked -p bifrost-cli --features "bifrost-runtime/guest-x86_64,bifrost-runtime/guest-aarch64,bifrost-runtime/interp,bifrost-runtime/jit-cranelift" -- capabilities
 ```
@@ -28,9 +29,10 @@ The raw-code examples print `RAX = 42, RIP = 0x1018` for x86-64 and `X0 = 43, PC
 | `bifrost-interpreter` | Bounded evaluation of verified IR |
 | `bifrost-codegen-clif` | Native lowering, guest-PC maps and checked exits |
 | `bifrost-runtime` | Capability discovery and shared raw execution API |
+| `bifrost-abi`, `bifrost-bridge` | Four guest call descriptors, typed native bindings and synchronous callbacks |
 | `bifrost-testkit` | Deterministic IR, x86-64 and ARM64 fixtures |
 
-See the [execution model](docs/execution-model.md) and [capability matrix](docs/capability-matrix.md) for scope and feature requirements. The CLI reports capabilities. Executable loading, OS services, native fast paths, and the C ABI are later milestones.
+See the [execution model](docs/execution-model.md), [ABI bridging](docs/abi-bridging.md), and [capability matrix](docs/capability-matrix.md) for scope and feature requirements. The CLI reports capabilities. Executable loading, OS services, native fast paths, and the C ABI are later milestones.
 
 ## Verify the workspace
 

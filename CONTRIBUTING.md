@@ -14,6 +14,7 @@ cargo run --locked -p bifrost-example-verify-ir
 cargo run --locked -p bifrost-example-execute-raw-x86
 cargo run --locked -p bifrost-example-execute-raw-x86 --features jit-cranelift
 cargo run --locked -p bifrost-example-execute-raw-arm64 --features jit-cranelift
+cargo run --locked -p bifrost-example-host-function-bridge --features jit-cranelift
 cargo run --locked -p bifrost-cli -- capabilities
 ```
 
@@ -27,6 +28,7 @@ export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
 export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER='qemu-aarch64 -L /usr/aarch64-linux-gnu'
 cargo test --locked --target aarch64-unknown-linux-gnu --release -p bifrost-differential
 cargo test --locked --target aarch64-unknown-linux-gnu -p bifrost-runtime --all-features --test arm64 --test jit --test jit_cache
+cargo test --locked --target aarch64-unknown-linux-gnu -p bifrost-example-host-function-bridge --all-features
 ```
 
 Scope changes to a crate or a narrow feature. Record cross-crate changes in an ADR, update the dependency allowlist with any new edge, and add a deterministic fixture for every newly claimed guest-visible behavior. Include both accepted and rejected inputs. Checked-in fixture bytes and IR are hand-authored for Bifröst.

@@ -210,3 +210,14 @@ impl<M: JitMemoryManager> Executor for RawJit<'_, M> {
         run_steps(self.isa, thread, budget, |thread| self.step(thread))
     }
 }
+
+#[cfg(feature = "abi-bridge")]
+impl<M: JitMemoryManager> bifrost_bridge::BridgeBackend for RawJit<'_, M> {
+    type Error = ExecutionError;
+    fn step(&mut self, thread: &mut GuestThread) -> Result<ExitReason, ExecutionError> {
+        RawJit::step(self, thread)
+    }
+    fn memory(&mut self) -> &mut dyn bifrost_core::GuestMemory {
+        self.memory_mut()
+    }
+}

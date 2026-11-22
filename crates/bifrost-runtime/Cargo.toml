@@ -8,6 +8,7 @@ publish = false
 
 [features]
 default = []
+abi-bridge = ["dep:bifrost-abi", "dep:bifrost-bridge"]
 guest-x86_64 = ["dep:bifrost-decoder-x86", "dep:bifrost-lifter-x86"]
 guest-aarch64 = ["dep:bifrost-decoder-arm64", "dep:bifrost-lifter-arm64"]
 interp = ["dep:bifrost-interpreter", "dep:bifrost-executor"]
@@ -21,6 +22,8 @@ host-linux = ["dep:bifrost-host-linux"]
 
 [dependencies]
 bifrost-core.workspace = true
+bifrost-abi = { workspace = true, optional = true }
+bifrost-bridge = { workspace = true, optional = true }
 bifrost-ir.workspace = true
 bifrost-memory.workspace = true
 bifrost-decoder-x86 = { workspace = true, optional = true }
