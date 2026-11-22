@@ -7,9 +7,10 @@ license.workspace = true
 publish = false
 
 [dependencies]
+bifrost-abi.workspace = true
 bifrost-core.workspace = true
 bifrost-ir.workspace = true
 bifrost-memory.workspace = true
 
-[lints]
-workspace = true
+[lints.rust]
+unsafe_code = "deny"

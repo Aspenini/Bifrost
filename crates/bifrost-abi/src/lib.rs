@@ -5,6 +5,9 @@ use bifrost_core::{
 };
 use std::fmt;
 
+mod layout;
+pub use layout::{Argument, ArgumentLocation, CallLayout, Pair64, ResultLocation};
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ArgumentRegisters {
     Independent,

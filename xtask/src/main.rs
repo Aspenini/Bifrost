@@ -92,7 +92,12 @@ fn allowed(package: &str) -> &'static [&'static str] {
             "bifrost-ir",
             "bifrost-testkit",
         ],
-        "bifrost-testkit" => &["bifrost-core", "bifrost-ir", "bifrost-memory"],
+        "bifrost-testkit" => &[
+            "bifrost-abi",
+            "bifrost-core",
+            "bifrost-ir",
+            "bifrost-memory",
+        ],
         "bifrost-cli" => &["bifrost-runtime"],
         "bifrost-example-verify-ir" => &["bifrost-memory", "bifrost-testkit"],
         "bifrost-example-execute-raw-x86"

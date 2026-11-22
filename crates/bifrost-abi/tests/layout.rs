@@ -36,3 +36,53 @@ fn mixed_arguments_use_the_guest_register_banks_and_stack() {
         AbiDescriptor::for_id(AbiId::WindowsArm64).unwrap().variadic
     );
 }
+
+#[test]
+fn aggregate_spills_leave_sysv_registers_available_and_exhaust_the_aapcs_bank() {
+    use Location::{Integer, Stack};
+    use bifrost_abi::{Argument, ArgumentLocation, ResultLocation};
+    let word = Argument::Scalar(Scalar::U64);
+    let sysv = AbiDescriptor::for_id(AbiId::LinuxSysvAmd64).unwrap();
+    let mut args = vec![word; 5];
+    args.extend([Argument::Pair64, word]);
+    let plan = sysv.layout(&args, Argument::Pair64).unwrap();
+    assert_eq!(
+        plan.arguments[5..],
+        [
+            ArgumentLocation::Pair([Stack(8), Stack(16)]),
+            ArgumentLocation::Word(Integer(9))
+        ]
+    );
+    assert_eq!(plan.result, ResultLocation::Pair([Integer(0), Integer(2)]));
+
+    let aapcs = AbiDescriptor::for_id(AbiId::LinuxAapcs64).unwrap();
+    let mut args = vec![word; 7];
+    args.extend([Argument::Pair64, word]);
+    let plan = aapcs.layout(&args, Argument::Pair64).unwrap();
+    assert_eq!(
+        plan.arguments[7..],
+        [
+            ArgumentLocation::Pair([Stack(0), Stack(8)]),
+            ArgumentLocation::Word(Stack(16))
+        ]
+    );
+
+    let windows = AbiDescriptor::for_id(AbiId::WindowsX64).unwrap();
+    let plan = windows
+        .layout(&[Argument::Pair64, word], Argument::Pair64)
+        .unwrap();
+    assert_eq!(
+        plan.arguments,
+        [
+            ArgumentLocation::IndirectPair(Integer(2)),
+            ArgumentLocation::Word(Integer(8))
+        ]
+    );
+    assert_eq!(
+        plan.result,
+        ResultLocation::IndirectPair {
+            pointer: Integer(1),
+            echo: Integer(0)
+        }
+    );
+}

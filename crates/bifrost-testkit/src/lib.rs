@@ -1,6 +1,7 @@
 //! Self-authored deterministic fixtures shared by Bifröst examples and tests.
 
 pub mod arm64;
+#[allow(unsafe_code)]
 pub mod native;
 pub mod x86;
 

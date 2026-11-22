@@ -14,5 +14,5 @@ bifrost-core.workspace = true
 bifrost-memory.workspace = true
 bifrost-testkit.workspace = true
 
-[lints]
-workspace = true
+[lints.rust]
+unsafe_code = "deny"

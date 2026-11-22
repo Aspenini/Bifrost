@@ -270,6 +270,10 @@ impl GuestMemoryRead for AddressSpace {
 }
 
 impl GuestMemory for AddressSpace {
+    fn check_write(&self, address: GuestAddress, len: usize) -> Result<(), MemoryError> {
+        self.validate(address, len, AccessKind::Write)
+    }
+
     fn write(&mut self, address: GuestAddress, bytes: &[u8]) -> Result<(), MemoryError> {
         self.validate(address, bytes.len(), AccessKind::Write)?;
         if bytes.is_empty() {

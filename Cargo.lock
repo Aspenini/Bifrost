@@ -253,6 +253,7 @@ dependencies = [
 name = "bifrost-testkit"
 version = "0.1.0"
 dependencies = [
+ "bifrost-abi",
  "bifrost-core",
  "bifrost-ir",
  "bifrost-memory",

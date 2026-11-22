@@ -37,6 +37,11 @@ pub trait GuestMemoryRead {
 /// Writes are all-or-nothing on error. Mutation requires exclusive access.
 pub trait GuestMemory: GuestMemoryRead {
     fn write(&mut self, address: GuestAddress, bytes: &[u8]) -> Result<(), MemoryError>;
+
+    /// Checks an entire span for writing without changing guest bytes or page generations.
+    fn check_write(&self, _address: GuestAddress, _len: usize) -> Result<(), MemoryError> {
+        Err(MemoryError::WriteCheckUnavailable)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -70,6 +75,7 @@ pub enum MemoryError {
     Allocation,
     GenerationExhausted,
     AddressSpaceIdentityExhausted,
+    WriteCheckUnavailable,
 }
 
 impl fmt::Display for MemoryError {
@@ -98,6 +104,9 @@ impl fmt::Display for MemoryError {
             Self::GenerationExhausted => f.write_str("guest page generations exhausted"),
             Self::AddressSpaceIdentityExhausted => {
                 f.write_str("guest address-space identities exhausted")
+            }
+            Self::WriteCheckUnavailable => {
+                f.write_str("guest memory does not support a non-mutating write check")
             }
         }
     }
