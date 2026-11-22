@@ -188,6 +188,13 @@ impl CpuState {
         }
     }
 
+    pub fn set_pc(&mut self, pc: GuestAddress) {
+        match self {
+            Self::X86_64(state) => state.rip = pc,
+            Self::AArch64(state) => state.pc = pc,
+        }
+    }
+
     pub const fn sp(&self) -> GuestAddress {
         match self {
             Self::X86_64(state) => GuestAddress(state.gpr[4]),

@@ -1,4 +1,4 @@
-use crate::{AccessKind, GuestAddress};
+use crate::{AccessKind, FaultClass, GuestAddress, GuestFault, GuestThreadId};
 use std::fmt;
 
 /// Reads and instruction fetches leave the output untouched on error.
@@ -74,3 +74,31 @@ impl fmt::Display for MemoryError {
 }
 
 impl std::error::Error for MemoryError {}
+
+impl MemoryError {
+    /// Converts guest access violations, preserving the precise address reported by memory.
+    pub const fn guest_fault(
+        self,
+        pc: GuestAddress,
+        thread: GuestThreadId,
+        access: AccessKind,
+    ) -> Option<GuestFault> {
+        let (address, class) = match self {
+            Self::AddressOverflow(address) => (address, FaultClass::AddressOverflow),
+            Self::Unmapped(address) => (address, FaultClass::Unmapped),
+            Self::Denied {
+                address,
+                protection: Protection::Guard,
+                ..
+            } => (address, FaultClass::Guard),
+            Self::Denied { address, .. } => (address, FaultClass::Protection),
+            _ => return None,
+        };
+        Some(GuestFault {
+            pc,
+            thread,
+            class,
+            memory_access: Some((address, access)),
+        })
+    }
+}

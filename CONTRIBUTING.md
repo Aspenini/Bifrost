@@ -11,7 +11,8 @@ cargo doc --locked --workspace --all-features --no-deps
 cargo check --locked -p bifrost-runtime --no-default-features
 cargo run --locked -p xtask -- check-deps
 cargo run --locked -p bifrost-example-verify-ir
+cargo run --locked -p bifrost-example-execute-raw-x86
 cargo run --locked -p bifrost-cli -- capabilities
 ```
 
-Scope changes to a crate or a narrow feature. Record cross-crate changes in an ADR, update the dependency allowlist with any new edge, and add a deterministic fixture for every newly claimed guest-visible behavior. Include both accepted and rejected inputs. The checked-in fixture is hand-authored Bifröst IR with a scalar data page and contains no external executable bytes.
+Scope changes to a crate or a narrow feature. Record cross-crate changes in an ADR, update the dependency allowlist with any new edge, and add a deterministic fixture for every newly claimed guest-visible behavior. Include both accepted and rejected inputs. Checked-in fixture bytes and IR are hand-authored for Bifröst.

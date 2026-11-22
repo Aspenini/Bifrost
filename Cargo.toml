@@ -30,6 +30,7 @@ members = [
     "crates/bifrost-ffi",
     "crates/bifrost-testkit",
     "apps/bifrost-cli",
+    "examples/execute-raw-x86",
     "examples/verify-ir",
     "xtask",
 ]

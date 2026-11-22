@@ -47,6 +47,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "bifrost-example-execute-raw-x86"
+version = "0.1.0"
+dependencies = [
+ "bifrost-runtime",
+ "bifrost-testkit",
+]
+
+[[package]]
 name = "bifrost-example-verify-ir"
 version = "0.1.0"
 dependencies = [
@@ -87,6 +95,13 @@ version = "0.1.0"
 [[package]]
 name = "bifrost-interpreter"
 version = "0.1.0"
+dependencies = [
+ "bifrost-core",
+ "bifrost-executor",
+ "bifrost-ir",
+ "bifrost-memory",
+ "bifrost-testkit",
+]
 
 [[package]]
 name = "bifrost-ir"
@@ -152,6 +167,7 @@ dependencies = [
  "bifrost-core",
  "bifrost-decoder-arm64",
  "bifrost-decoder-x86",
+ "bifrost-executor",
  "bifrost-host-linux",
  "bifrost-host-windows",
  "bifrost-interpreter",
@@ -163,6 +179,7 @@ dependencies = [
  "bifrost-memory",
  "bifrost-os-linux",
  "bifrost-os-windows",
+ "bifrost-testkit",
 ]
 
 [[package]]

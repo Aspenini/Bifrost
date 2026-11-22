@@ -1,0 +1,14 @@
+[package]
+name = "bifrost-example-execute-raw-x86"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+bifrost-runtime = { workspace = true, features = ["guest-x86_64", "interp"] }
+bifrost-testkit.workspace = true
+
+[lints]
+workspace = true

@@ -56,6 +56,13 @@ fn allowed(package: &str) -> &'static [&'static str] {
     match package {
         "bifrost-memory" | "bifrost-executor" | "bifrost-host" | "bifrost-ir" => &["bifrost-core"],
         "bifrost-codegen" => &["bifrost-core", "bifrost-ir"],
+        "bifrost-interpreter" => &[
+            "bifrost-core",
+            "bifrost-executor",
+            "bifrost-ir",
+            "bifrost-memory",
+            "bifrost-testkit",
+        ],
         "bifrost-decoder-x86" => &["bifrost-core", "bifrost-memory", "iced-x86"],
         "bifrost-lifter-x86" => &[
             "bifrost-core",
@@ -66,15 +73,18 @@ fn allowed(package: &str) -> &'static [&'static str] {
         "bifrost-testkit" => &["bifrost-core", "bifrost-ir", "bifrost-memory"],
         "bifrost-cli" => &["bifrost-runtime"],
         "bifrost-example-verify-ir" => &["bifrost-memory", "bifrost-testkit"],
+        "bifrost-example-execute-raw-x86" => &["bifrost-runtime", "bifrost-testkit"],
         "bifrost-runtime" => &[
             "bifrost-core",
             "bifrost-ir",
             "bifrost-memory",
+            "bifrost-testkit",
             "bifrost-decoder-x86",
             "bifrost-lifter-x86",
             "bifrost-decoder-arm64",
             "bifrost-lifter-arm64",
             "bifrost-interpreter",
+            "bifrost-executor",
             "bifrost-codegen-clif",
             "bifrost-loader-elf",
             "bifrost-loader-pe",

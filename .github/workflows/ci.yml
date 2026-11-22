@@ -24,6 +24,8 @@ jobs:
       - run: cargo test --locked --workspace --all-features
       - run: cargo doc --locked --workspace --all-features --no-deps
       - run: cargo check --locked -p bifrost-runtime --no-default-features
+      - run: cargo test --locked -p bifrost-runtime --no-default-features
       - run: cargo run --locked -p xtask -- check-deps
       - run: cargo run --locked -p bifrost-example-verify-ir
+      - run: cargo run --locked -p bifrost-example-execute-raw-x86
       - run: cargo run --locked -p bifrost-cli -- capabilities

@@ -176,6 +176,10 @@ pub trait TraceSink {
     fn record(&mut self, event: TraceEvent);
 }
 
+impl TraceSink for () {
+    fn record(&mut self, _: TraceEvent) {}
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum TraceEvent {
