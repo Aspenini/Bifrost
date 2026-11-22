@@ -58,6 +58,7 @@ fn allowed(package: &str) -> &'static [&'static str] {
         "bifrost-abi" => &["bifrost-core"],
         "bifrost-loader" => &["bifrost-core", "bifrost-memory"],
         "bifrost-loader-elf" => &["bifrost-core", "bifrost-loader", "bifrost-memory"],
+        "bifrost-os-linux" => &["bifrost-core", "bifrost-vfs", "bifrost-memory"],
         "bifrost-bridge" => &[
             "bifrost-executor",
             "bifrost-abi",

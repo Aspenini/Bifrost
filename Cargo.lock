@@ -233,6 +233,11 @@ dependencies = [
 [[package]]
 name = "bifrost-os-linux"
 version = "0.1.0"
+dependencies = [
+ "bifrost-core",
+ "bifrost-memory",
+ "bifrost-vfs",
+]
 
 [[package]]
 name = "bifrost-os-macos"
