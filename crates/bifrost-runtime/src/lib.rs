@@ -11,7 +11,11 @@ pub use bifrost_ir as ir;
 #[cfg(feature = "macho-inspect")]
 pub use bifrost_loader_macho as macho;
 pub use bifrost_memory as memory;
-#[cfg(any(feature = "linux-elf", feature = "windows-pe"))]
+#[cfg(any(
+    feature = "linux-elf",
+    feature = "windows-pe",
+    feature = "macos-standalone"
+))]
 pub mod process;
 #[cfg(feature = "abi-bridge")]
 pub use {bifrost_abi as abi, bifrost_bridge as bridge};
@@ -300,20 +304,28 @@ impl Default for RuntimeProfile {
                 ))
                 .expect("unique built-in capability");
         }
-        let macho = if cfg!(feature = "macho-inspect") {
-            Capability::implemented(
+        for (id, enabled, detail) in [
+            (
                 "macho-inspect",
-                true,
-                SupportLevel::Experimental,
+                cfg!(feature = "macho-inspect"),
                 "thin and universal Mach-O metadata inspection",
-            )
-            .expect("implemented support")
-        } else {
-            Capability::planned("macho-inspect", false, "enable macho-inspect")
-        };
-        capabilities
-            .register(macho)
-            .expect("unique Mach-O capability");
+            ),
+            (
+                "macos-standalone",
+                cfg!(feature = "macos-standalone"),
+                "fixed-address x86-64 Mach-O with portable Darwin console services",
+            ),
+        ] {
+            let capability = if enabled {
+                Capability::implemented(id, true, SupportLevel::Experimental, detail)
+                    .expect("implemented support")
+            } else {
+                Capability::planned(id, false, "enable the matching feature")
+            };
+            capabilities
+                .register(capability)
+                .expect("unique Mach-O capability");
+        }
         Self {
             host,
             jit_ready,

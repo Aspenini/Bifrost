@@ -257,6 +257,9 @@ dependencies = [
 [[package]]
 name = "bifrost-os-macos"
 version = "0.1.0"
+dependencies = [
+ "bifrost-core",
+]
 
 [[package]]
 name = "bifrost-os-windows"
@@ -293,6 +296,7 @@ dependencies = [
  "bifrost-loader-pe",
  "bifrost-memory",
  "bifrost-os-linux",
+ "bifrost-os-macos",
  "bifrost-os-windows",
  "bifrost-testkit",
 ]

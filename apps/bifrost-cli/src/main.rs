@@ -1,7 +1,7 @@
 use bifrost_runtime::{
     RuntimeProfile,
     core::{CapabilityProvider, ExecMode, TraceSink},
-    process::{self, ApiPolicy, Io, RunOptions, Vfs, WindowsIo},
+    process::{self, ApiPolicy, DarwinIo, Io, RunOptions, Vfs, WindowsIo},
 };
 mod trace;
 use std::{
@@ -92,6 +92,7 @@ fn doctor() {
         "linux-elf",
         "windows-pe",
         "macho-inspect",
+        "macos-standalone",
     ] {
         let item = profile
             .capabilities()
@@ -228,12 +229,24 @@ fn run(args: &[OsString], trace: &mut dyn TraceSink) -> Result<u32, Error> {
     let argv: Vec<_> = guest_args.iter().map(|arg| arg.as_bytes()).collect();
     let image = read_file(Path::new(path))?;
     let (mut stdout, mut stderr) = (io::stdout().lock(), io::stderr().lock());
-    let status = if image.starts_with(bifrost_runtime::macho::MAGIC)
-        || bifrost_runtime::macho::is_universal(&image)
-    {
-        return Err(
-            "Mach-O support is limited to inspection; macOS guest execution is unavailable".into(),
-        );
+    let status = if bifrost_runtime::macho::is_universal(&image) {
+        return Err("universal Mach-O containers are inspection-only".into());
+    } else if image.starts_with(bifrost_runtime::macho::MAGIC) {
+        if mounted || argv.len() > 1 || api.is_some() {
+            return Err(
+                "standalone Mach-O does not accept mounts, API policies, or guest arguments".into(),
+            );
+        }
+        RuntimeProfile::default()
+            .prepare_macos(
+                &image,
+                DarwinIo {
+                    stdout: &mut stdout,
+                    stderr: &mut stderr,
+                },
+                options,
+            )
+            .and_then(|mut process| process.run(trace))
     } else if image.starts_with(b"MZ") {
         if mounted || argv.len() > 1 {
             return Err("PE execution currently accepts neither mounts nor guest arguments".into());

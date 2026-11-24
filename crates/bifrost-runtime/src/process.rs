@@ -15,6 +15,8 @@ pub use bifrost_loader::{Format, Metadata};
 pub use bifrost_os_linux::{Io, Vfs};
 #[cfg(feature = "linux-elf")]
 use bifrost_os_linux::{Linux, ThreadSyscall, UnsupportedSyscall};
+#[cfg(feature = "macos-standalone")]
+pub use bifrost_os_macos::Io as DarwinIo;
 #[cfg(feature = "windows-pe")]
 use bifrost_os_windows::{ApiAction, RETURN_PC, STUB_BASE, Windows};
 #[cfg(feature = "windows-pe")]
@@ -50,6 +52,8 @@ pub enum RunError {
     Execution(ExecutionError),
     #[cfg(feature = "linux-elf")]
     Syscall(UnsupportedSyscall),
+    #[cfg(feature = "macos-standalone")]
+    Darwin(bifrost_os_macos::UnsupportedSyscall),
     #[cfg(feature = "windows-pe")]
     Windows(bifrost_os_windows::ApiError),
     #[cfg(feature = "windows-pe")]
@@ -73,6 +77,8 @@ impl fmt::Display for RunError {
             Self::Execution(error) => error.fmt(f),
             #[cfg(feature = "linux-elf")]
             Self::Syscall(error) => error.fmt(f),
+            #[cfg(feature = "macos-standalone")]
+            Self::Darwin(error) => error.fmt(f),
             #[cfg(feature = "windows-pe")]
             Self::Windows(error) => error.fmt(f),
             #[cfg(feature = "windows-pe")]
@@ -113,6 +119,10 @@ pub fn inspect(bytes: &[u8]) -> Result<Metadata, LoadError> {
     }
     #[cfg(feature = "macho-inspect")]
     if bytes.starts_with(crate::macho::MAGIC) {
+        #[cfg(feature = "macos-standalone")]
+        if let Ok(image) = crate::macho::standalone_image(bytes) {
+            return Ok(image.metadata);
+        }
         return crate::macho::inspect(bytes);
     }
     #[cfg(feature = "linux-elf")]
@@ -184,6 +194,40 @@ pub fn run_linux_traced<'a>(
 }
 
 impl RuntimeProfile {
+    /// Maps a fixed Mach-O UNIX-thread image with a minimal Darwin startup stack.
+    #[cfg(feature = "macos-standalone")]
+    pub fn prepare_macos<'a>(
+        &self,
+        bytes: &[u8],
+        io: DarwinIo<'a>,
+        options: RunOptions,
+    ) -> Result<PreparedProcess<'a>, RunError> {
+        const STACK_TOP: u64 = 0x7fff_ffff_0000;
+        const STACK_SIZE: u64 = 64 * bifrost_loader::PAGE;
+        let image = crate::macho::standalone_image(bytes)?;
+        let mode = self
+            .select_execution(bare_target(), options.execution)
+            .map_err(RunError::Mode)?;
+        let mut memory = image.map()?;
+        let guard = GuestAddress(STACK_TOP - STACK_SIZE - bifrost_loader::PAGE);
+        memory
+            .map_guarded_stack(guard, STACK_SIZE)
+            .map_err(RunError::ThreadStack)?;
+        let mut state = X86State {
+            rip: image.metadata.entry,
+            ..Default::default()
+        };
+        state.gpr[4] = STACK_TOP - 32; // Zero argc, argv, environment, and Apple vectors.
+        Ok(PreparedProcess::new(
+            image.metadata,
+            memory,
+            state,
+            Services::Darwin(io),
+            mode,
+            options.instruction_limit,
+        ))
+    }
+
     /// Selects the backend and maps a static Linux image without executing guest code.
     #[cfg(feature = "linux-elf")]
     pub fn prepare_linux<'a>(
@@ -394,6 +438,8 @@ impl<'a> PreparedProcess<'a> {
 }
 
 enum Services<'a> {
+    #[cfg(feature = "macos-standalone")]
+    Darwin(DarwinIo<'a>),
     #[cfg(feature = "linux-elf")]
     Linux(Linux<'a>),
     #[cfg(feature = "windows-pe")]
@@ -407,13 +453,27 @@ impl Services<'_> {
         memory: &mut dyn GuestMemory,
     ) -> Result<Action, RunError> {
         match self {
+            #[cfg(feature = "macos-standalone")]
+            Self::Darwin(darwin) => {
+                let CpuState::X86_64(cpu) = &mut thread.cpu else {
+                    return Err(RunError::Backend);
+                };
+                if !is_syscall(memory, cpu.rip) {
+                    return Ok(Action::Step);
+                }
+                Ok(
+                    match darwin.syscall(cpu, memory).map_err(RunError::Darwin)? {
+                        bifrost_os_macos::Action::Continue => Action::Continue,
+                        bifrost_os_macos::Action::Exit(status) => Action::ExitGroup(status.into()),
+                    },
+                )
+            }
             #[cfg(feature = "linux-elf")]
             Self::Linux(linux) => {
                 let CpuState::X86_64(cpu) = &mut thread.cpu else {
                     return Err(RunError::Backend);
                 };
-                let mut opcode = [0; 2];
-                if memory.fetch(cpu.rip, &mut opcode).is_err() || opcode != [0x0f, 0x05] {
+                if !is_syscall(memory, cpu.rip) {
                     return Ok(Action::Step);
                 }
                 Ok(
@@ -451,6 +511,12 @@ enum Action {
     #[cfg(feature = "linux-elf")]
     ExitThread(u32),
     ExitGroup(u32),
+}
+
+#[cfg(any(feature = "linux-elf", feature = "macos-standalone"))]
+fn is_syscall(memory: &dyn GuestMemory, pc: GuestAddress) -> bool {
+    let mut opcode = [0; 2];
+    memory.fetch(pc, &mut opcode).is_ok() && opcode == [0x0f, 0x05]
 }
 
 fn bare_target() -> GuestTarget {

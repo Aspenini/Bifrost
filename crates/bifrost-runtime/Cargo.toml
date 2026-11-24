@@ -10,6 +10,7 @@ publish = false
 default = []
 linux-elf = ["loader-elf", "os-linux", "guest-x86_64", "interp"]
 windows-pe = ["loader-pe", "os-windows", "guest-x86_64", "interp"]
+macos-standalone = ["macho-inspect", "dep:bifrost-loader", "dep:bifrost-os-macos", "guest-x86_64", "interp"]
 abi-bridge = ["dep:bifrost-abi", "dep:bifrost-bridge"]
 guest-x86_64 = ["dep:bifrost-decoder-x86", "dep:bifrost-lifter-x86"]
 guest-aarch64 = ["dep:bifrost-decoder-arm64", "dep:bifrost-lifter-arm64"]
@@ -45,6 +46,7 @@ bifrost-loader-pe = { workspace = true, optional = true }
 bifrost-loader-macho = { workspace = true, optional = true }
 bifrost-os-linux = { workspace = true, optional = true }
 bifrost-os-windows = { workspace = true, optional = true }
+bifrost-os-macos = { workspace = true, optional = true }
 bifrost-host-windows = { workspace = true, optional = true }
 bifrost-host-linux = { workspace = true, optional = true }
 bifrost-host-macos = { workspace = true, optional = true }

@@ -11,7 +11,7 @@ name = "bifrost"
 path = "src/main.rs"
 
 [dependencies]
-bifrost-runtime = { workspace = true, features = ["linux-elf", "windows-pe", "macho-inspect", "host-linux", "host-windows", "host-macos"] }
+bifrost-runtime = { workspace = true, features = ["linux-elf", "windows-pe", "macos-standalone", "host-linux", "host-windows", "host-macos"] }
 
 [features]
 default = ["jit"]

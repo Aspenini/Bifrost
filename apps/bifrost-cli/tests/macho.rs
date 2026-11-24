@@ -38,5 +38,34 @@ fn inspects_macho_and_refuses_execution() {
         .output()
         .unwrap();
     assert!(!run.status.success());
-    assert!(String::from_utf8_lossy(&run.stderr).contains("macOS guest execution is unavailable"));
+    assert!(
+        String::from_utf8_lossy(&run.stderr).contains("requires a thin x86-64 Mach-O executable")
+    );
+}
+
+#[test]
+fn executes_standalone_macho_and_rejects_dyld_images() {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/macho");
+    let tool = env!("CARGO_BIN_EXE_bifrost");
+    for mode in ["interp", "auto"] {
+        let result = Command::new(tool)
+            .args(["run", "--exec", mode])
+            .arg(fixtures.join("standalone.macho"))
+            .output()
+            .unwrap();
+        assert_eq!(
+            result.status.code(),
+            Some(45),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        assert_eq!(result.stdout, b"Hello from Bifrost Darwin!\n");
+    }
+    let result = Command::new(tool)
+        .arg("run")
+        .arg(fixtures.join("entry-x86_64.macho"))
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("standalone image"));
 }

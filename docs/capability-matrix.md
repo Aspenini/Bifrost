@@ -16,6 +16,7 @@
 | Cooperative Linux threads | Rust embedding with host-enrolled x86-64 threads, guarded stacks, and interpreter/JIT parity |
 | Windows PE and API provider | Partial, fixed-base x86-64 console images and named Win32/NT calls. Enable `windows-pe`. |
 | Mach-O inspection | Experimental, thin and universal x86-64/ARM64 executables, plus ARM64e slice identification. See the [research scope](research.md). |
+| Darwin guest execution | Experimental, standalone fixed-address x86-64 Mach-O with console writes and exit. [Profile](research.md#standalone-darwin-guests) |
 | ABI bridge | Partial, four guest ABI descriptors with fixed signatures and synchronous callbacks. Enable `abi-bridge`. |
 | C ABI | Version 1 for raw x86-64 and ARM64 interpretation and optional portable ELF/PE execution. See the [C SDK](sdk.md). |
 | CLI | Host diagnostics, text or JSON capability reporting, image inspection, bounded ELF/PE execution and JSONL tracing |

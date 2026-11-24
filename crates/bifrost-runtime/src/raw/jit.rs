@@ -67,7 +67,11 @@ pub struct RawJit<'a, M: JitMemoryManager> {
 
 impl<'a, M: JitMemoryManager> RawJit<'a, M> {
     #[cfg(all(
-        any(feature = "linux-elf", feature = "windows-pe"),
+        any(
+            feature = "linux-elf",
+            feature = "windows-pe",
+            feature = "macos-standalone"
+        ),
         any(target_os = "windows", target_os = "linux"),
         any(target_arch = "x86_64", target_arch = "aarch64")
     ))]

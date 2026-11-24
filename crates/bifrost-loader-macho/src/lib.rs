@@ -1,6 +1,8 @@
 //! Experimental metadata inspection for thin and universal Mach-O executables.
 use bifrost_core::{GuestAddress, GuestIsa};
 use bifrost_loader::{Format, LoadError, MAX_IMAGE_BYTES, Metadata, slice, u32_at, u64_at};
+mod standalone;
+pub use standalone::standalone_image;
 
 pub const MAGIC: &[u8; 4] = b"\xcf\xfa\xed\xfe";
 const FAT32: &[u8; 4] = b"\xca\xfe\xba\xbe";
