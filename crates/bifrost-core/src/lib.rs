@@ -151,6 +151,36 @@ pub enum AccessKind {
 pub struct GuestThreadId(pub u64);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Arm64PointerKey {
+    InstructionA,
+    InstructionB,
+    DataA,
+    DataB,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Arm64PointerModifier {
+    Register(u8),
+    StackPointer,
+    Zero,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Arm64PointerAction {
+    Sign,
+    Authenticate,
+    AuthenticateReturn,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Arm64PointerAuth {
+    pub action: Arm64PointerAction,
+    pub key: Arm64PointerKey,
+    pub pointer_register: u8,
+    pub modifier: Arm64PointerModifier,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum FaultClass {
     AddressOverflow,

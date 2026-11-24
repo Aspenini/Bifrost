@@ -24,6 +24,8 @@ A successful step returns the next guest PC. The runtime fetches one instruction
 
 An AArch64 `SVC` returns `ExitReason::Arm64SupervisorCall` with the instruction address and 16-bit immediate on both backends. The runtime records the instruction in the trace and preserves the register state and pending fault. The caller applies its own ABI and advances the guest PC to resume.
 
+The supported AArch64 pointer-authentication instructions return `ExitReason::Arm64PointerAuth` with their decoded operands and instruction address. The caller provides the guest pointer-authentication policy and updates CPU state before resuming. Both backends pass the request out before modifying registers.
+
 The standalone `bifrost-interpreter` executes verified IR directly. Each step covers the consecutive operations at one PC within a block, with the terminator included if it has that PC. Block parameters transfer as raw typed bits and budget exits preserve the frame. An instruction frontend puts faulting checks and accesses before architectural writes to give precise restart state.
 
 `RuntimeProfile::select_execution` resolves `Auto` to JIT when the bare scalar target and system executable-memory policy permit it, then to the interpreter if enabled. JIT publication errors remain typed during execution. The system publishers target Windows and Linux on x86-64 and ARM64. See [ADR 0002](adr/0002-cranelift-block-abi.md) for memory and exit handling.

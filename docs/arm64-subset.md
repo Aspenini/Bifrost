@@ -16,6 +16,7 @@ The raw profile uses little-endian A64 instructions and serialized execution ove
 | Branch | B, BL, B.cond, 32-bit and 64-bit CBZ/CBNZ, TBZ/TBNZ, RET Xn |
 | Miscellaneous | NOP, DMB ISH, UDF |
 | Supervisor call | SVC with a 16-bit immediate, reported to the caller as an execution exit |
+| Pointer authentication | Register PAC/AUT, PACIASP/PACIBSP, AUTIASP/AUTIBSP, and RETAA/RETAB produce typed host exits before modifying guest state |
 
 Register 31 denotes SP where the immediate arithmetic encoding permits it and XZR in the listed zero-register forms. ADDS/SUBS set N, Z, C and V without changing SP. SUBS sets C when there is no unsigned borrow. BL writes the next guest PC to X30, and RET reads its destination register. The next fetch detects a misaligned return destination.
 

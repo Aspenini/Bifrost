@@ -1,5 +1,8 @@
 //! Fixed-width decoder for Bifröst's bare A64 scalar profile.
-use bifrost_core::{GuestAddress, GuestMemoryRead, MemoryError};
+use bifrost_core::{
+    Arm64PointerAction, Arm64PointerAuth, Arm64PointerKey, Arm64PointerModifier, GuestAddress,
+    GuestMemoryRead, MemoryError,
+};
 use std::fmt;
 
 pub const INSTRUCTION_BYTES: u64 = 4;
@@ -194,6 +197,7 @@ pub enum Operation {
     SupervisorCall {
         immediate: u16,
     },
+    PointerAuth(Arm64PointerAuth),
     Fence,
     Undefined,
     Unsupported,
@@ -359,6 +363,54 @@ fn logical_kind(word: u32) -> Logical {
     }
 }
 
+fn pointer_auth(word: u32) -> Option<Arm64PointerAuth> {
+    use Arm64PointerAction::{Authenticate, AuthenticateReturn, Sign};
+    use Arm64PointerKey::{DataA, DataB, InstructionA, InstructionB};
+    use Arm64PointerModifier::{Register, StackPointer, Zero};
+
+    let (action, key) = match word {
+        0xd503_233f => (Sign, InstructionA),
+        0xd503_237f => (Sign, InstructionB),
+        0xd503_23bf => (Authenticate, InstructionA),
+        0xd503_23ff => (Authenticate, InstructionB),
+        0xd65f_0bff => (AuthenticateReturn, InstructionA),
+        0xd65f_0fff => (AuthenticateReturn, InstructionB),
+        _ if word & 0xffff_c000 == 0xdac1_0000 => {
+            let pointer_register = (word & 31) as u8;
+            let modifier_reg = ((word >> 5) & 31) as u8;
+            let modifier = if word & (1 << 13) != 0 {
+                if modifier_reg != 31 {
+                    return None;
+                }
+                Zero
+            } else if modifier_reg == 31 {
+                StackPointer
+            } else {
+                Register(modifier_reg)
+            };
+            let action = if word & (1 << 12) == 0 {
+                Sign
+            } else {
+                Authenticate
+            };
+            let key = [InstructionA, InstructionB, DataA, DataB][((word >> 10) & 3) as usize];
+            return Some(Arm64PointerAuth {
+                action,
+                key,
+                pointer_register,
+                modifier,
+            });
+        }
+        _ => return None,
+    };
+    Some(Arm64PointerAuth {
+        action,
+        key,
+        pointer_register: 30,
+        modifier: StackPointer,
+    })
+}
+
 fn operation(word: u32, pc: GuestAddress) -> Operation {
     let dst = reg(word, false);
     let lhs = reg(word >> 5, false);
@@ -371,6 +423,9 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
         return Operation::SupervisorCall {
             immediate: ((word >> 5) & 0xffff) as u16,
         };
+    }
+    if let Some(operation) = pointer_auth(word) {
+        return Operation::PointerAuth(operation);
     }
     if word & 0x1f00_0000 == 0x1000_0000 {
         let imm = ((word >> 5) & 0x7ffff) << 2 | ((word >> 29) & 3);

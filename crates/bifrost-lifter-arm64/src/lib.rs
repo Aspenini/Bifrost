@@ -1,8 +1,8 @@
 //! Lift the bare ARM64 scalar profile to verified-backend-neutral Bifröst IR.
 
 use bifrost_core::{
-    AbiId, CpuFeatureSet, FaultClass, GuestAddress, GuestIsa, GuestMemoryRead, GuestOs,
-    GuestTarget, TargetError,
+    AbiId, Arm64PointerAuth, CpuFeatureSet, FaultClass, GuestAddress, GuestIsa, GuestMemoryRead,
+    GuestOs, GuestTarget, TargetError,
 };
 use bifrost_decoder_arm64::{
     AddressExtend, Bitfield, DecodeError, DecodedInstruction, Logical, Operand, Operation, Reg,
@@ -30,6 +30,10 @@ pub enum LiftError {
         pc: GuestAddress,
         immediate: u16,
     },
+    PointerAuth {
+        pc: GuestAddress,
+        operation: Arm64PointerAuth,
+    },
     UnsupportedInstruction {
         pc: GuestAddress,
         word: u32,
@@ -44,6 +48,9 @@ impl fmt::Display for LiftError {
             Self::Target(error) => error.fmt(f),
             Self::SupervisorCall { pc, immediate } => {
                 write!(f, "ARM64 supervisor call #{immediate:#06x} at {:#x}", pc.0)
+            }
+            Self::PointerAuth { pc, .. } => {
+                write!(f, "ARM64 pointer authentication at {:#x}", pc.0)
             }
             Self::UnsupportedInstruction { pc, word, features } => write!(
                 f,
@@ -452,6 +459,9 @@ impl Arm64Lifter {
             }
             Operation::SupervisorCall { immediate } => {
                 return Err(LiftError::SupervisorCall { pc, immediate });
+            }
+            Operation::PointerAuth(operation) => {
+                return Err(LiftError::PointerAuth { pc, operation });
             }
             Operation::Fence => {
                 ir.emit(Op::Fence);

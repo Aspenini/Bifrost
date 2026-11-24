@@ -238,6 +238,46 @@ fn word_moves_zero_extend_without_setting_flags() {
 }
 
 #[test]
+fn pointer_authentication_exits_before_modifying_guest_registers() {
+    use bifrost_runtime::core::{
+        Arm64PointerAction, Arm64PointerAuth, Arm64PointerKey, Arm64PointerModifier,
+    };
+
+    let code = [0xdac1_01f0]; // pacia x16, x15
+    let (mut memory, mut thread) = memory_and_thread(&code, Protection::ReadWrite);
+    let original = thread.clone();
+    let expected = ExitReason::Arm64PointerAuth {
+        pc: CODE,
+        operation: Arm64PointerAuth {
+            action: Arm64PointerAction::Sign,
+            key: Arm64PointerKey::InstructionA,
+            pointer_register: 16,
+            modifier: Arm64PointerModifier::Register(15),
+        },
+    };
+    let exit = RawInterpreter::new(&target(), &mut memory, &mut ())
+        .unwrap()
+        .step(&mut thread)
+        .unwrap();
+    assert_eq!(exit, expected);
+    assert_eq!(thread, original);
+    #[cfg(all(
+        feature = "jit-cranelift",
+        any(target_arch = "x86_64", target_arch = "aarch64"),
+        any(target_os = "linux", target_os = "windows")
+    ))]
+    {
+        use bifrost_runtime::raw::{RawJit, SystemJitMemory};
+        let exit = RawJit::new(&target(), &mut memory, &mut (), SystemJitMemory)
+            .unwrap()
+            .step(&mut thread)
+            .unwrap();
+        assert_eq!(exit, expected);
+        assert_eq!(thread, original);
+    }
+}
+
+#[test]
 fn scalar_memory_access_preserves_adjacent_bytes_and_zero_extends_loads() {
     check_memory_access([0x3900_0420, 0x3940_0422], DATA.0, 1, &[0xab]); // strb/ldrb [x1,#1]
     check_memory_access([0x381f_f020, 0x385f_f022], DATA.0 + 2, 1, &[0xab]); // sturb/ldurb [x1,#-1]
