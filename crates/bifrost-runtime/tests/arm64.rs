@@ -393,19 +393,35 @@ fn validates_arm64_feature_requirements_at_construction() {
 }
 
 #[test]
-fn word_pairs_read_and_write_contiguous_words_and_guard_the_whole_span() {
-    let code = [0x293f_8820, 0x297f_9023]; // stp w0,w2,[x1,#-4]; ldp w3,w4,[x1,#-4]
-    for faulting in [false, true] {
-        let (mut memory, mut thread) = memory_and_thread(&code, Protection::ReadWrite);
-        let address = if faulting { Addr(DATA.0 + 4092) } else { DATA };
-        let before = [0x77; 4];
-        memory.write(address, &before).unwrap();
+fn register_pairs_transfer_contiguous_values_and_guard_the_whole_span() {
+    check_register_pair([0x293f_8820, 0x297f_9023], 4); // stp/ldp with W registers and #-4
+    check_register_pair([0xa93f_8820, 0xa97f_9023], 8); // stp/ldp with X registers and #-8
+}
+
+fn check_register_pair(code: [u32; 2], width: usize) {
+    let first: u64 = 0xdead_beef_1122_3344;
+    let second: u64 = 0xdead_beef_aabb_ccdd;
+    for fault in [None, Some(AccessKind::Write), Some(AccessKind::Read)] {
+        let code = if fault == Some(AccessKind::Read) {
+            &code[1..]
+        } else {
+            &code[..]
+        };
+        let (mut memory, mut thread) = memory_and_thread(code, Protection::ReadWrite);
+        let address = if fault.is_some() {
+            Addr(DATA.0 + 4096 - width as u64)
+        } else {
+            DATA
+        };
+        let size = if fault.is_some() { width } else { width * 2 };
+        let before = &[0x77; 16][..size];
+        memory.write(address, before).unwrap();
         let CpuState::AArch64(cpu) = &mut thread.cpu else {
             unreachable!()
         };
-        cpu.x[0] = 0xdead_beef_1122_3344;
-        cpu.x[1] = address.0 + 4;
-        cpu.x[2] = 0xdead_beef_aabb_ccdd;
+        cpu.x[0] = first;
+        cpu.x[1] = address.0 + width as u64;
+        cpu.x[2] = second;
         cpu.x[3] = u64::MAX;
         cpu.x[4] = u64::MAX;
         let original = thread.clone();
@@ -414,23 +430,28 @@ fn word_pairs_read_and_write_contiguous_words_and_guard_the_whole_span() {
             .unwrap()
             .run(&mut thread, budget)
             .unwrap();
-        let mut first = [0; 4];
-        memory.read(address, &mut first).unwrap();
-        if faulting {
+        let mut bytes = [0; 16];
+        memory.read(address, &mut bytes[..size]).unwrap();
+        if let Some(access) = fault {
             let ExitReason::Fault(fault) = exit else {
                 panic!("pair must fault at the page boundary")
             };
             assert_eq!(fault.pc, CODE);
             assert_eq!(fault.class, FaultClass::Unmapped);
-            assert_eq!(first, before);
+            assert_eq!(fault.memory_access.map(|(_, kind)| kind), Some(access));
+            assert_eq!(&bytes[..size], before);
             assert_eq!(thread.cpu, original.cpu);
         } else {
             assert_eq!(exit, ExitReason::BudgetExhausted);
-            assert_eq!(state(&thread).x[3..5], [0x1122_3344, 0xaabb_ccdd]);
-            assert_eq!(state(&thread).x[1], address.0 + 4);
-            let mut pair = [0; 8];
-            memory.read(address, &mut pair).unwrap();
-            assert_eq!(pair, [0x44, 0x33, 0x22, 0x11, 0xdd, 0xcc, 0xbb, 0xaa]);
+            let mask = if width == 4 {
+                u64::from(u32::MAX)
+            } else {
+                u64::MAX
+            };
+            assert_eq!(state(&thread).x[3..5], [first & mask, second & mask]);
+            assert_eq!(state(&thread).x[1], address.0 + width as u64);
+            assert_eq!(bytes[..width], first.to_le_bytes()[..width]);
+            assert_eq!(bytes[width..size], second.to_le_bytes()[..width]);
         }
 
         #[cfg(all(
@@ -440,7 +461,7 @@ fn word_pairs_read_and_write_contiguous_words_and_guard_the_whole_span() {
         ))]
         {
             use bifrost_runtime::raw::{RawJit, SystemJitMemory};
-            memory.write(address, &before).unwrap();
+            memory.write(address, before).unwrap();
             let mut jitted = original;
             let actual = RawJit::new(&target(), &mut memory, &mut (), SystemJitMemory)
                 .unwrap()
@@ -448,9 +469,9 @@ fn word_pairs_read_and_write_contiguous_words_and_guard_the_whole_span() {
                 .unwrap();
             assert_eq!(actual, exit);
             assert_eq!(jitted, thread);
-            let mut jitted_first = [0; 4];
-            memory.read(address, &mut jitted_first).unwrap();
-            assert_eq!(jitted_first, first);
+            let mut jitted_bytes = [0; 16];
+            memory.read(address, &mut jitted_bytes[..size]).unwrap();
+            assert_eq!(jitted_bytes, bytes);
         }
     }
 }

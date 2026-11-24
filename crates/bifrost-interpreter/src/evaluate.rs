@@ -130,6 +130,45 @@ pub(crate) fn instruction(
                 .write(address, &bytes[offset..offset + width])
                 .map_err(|err| memory_error(pc, thread, AccessKind::Write, err));
         }
+        Op::LoadPair64 {
+            first,
+            second,
+            guard,
+        } => {
+            let address = guarded_address(locals, guard);
+            check_access(
+                pc,
+                thread,
+                address,
+                AccessKind::Read,
+                MemoryLayout::I64_PAIR_LE,
+            )?;
+            let mut bytes = [0; 16];
+            memory
+                .read(address, &mut bytes)
+                .map_err(|err| memory_error(pc, thread, AccessKind::Read, err))?;
+            let pair = u128::from_le_bytes(bytes);
+            locals.insert(first, Local::Data(Value::new(Type::I64, pair)));
+            (second, Value::new(Type::I64, pair >> 64))
+        }
+        Op::StorePair64 {
+            first,
+            second,
+            guard,
+        } => {
+            let address = guarded_address(locals, guard);
+            check_access(
+                pc,
+                thread,
+                address,
+                AccessKind::Write,
+                MemoryLayout::I64_PAIR_LE,
+            )?;
+            let pair = data(locals, first).bits | (data(locals, second).bits << 64);
+            return memory
+                .write(address, &pair.to_le_bytes())
+                .map_err(|err| memory_error(pc, thread, AccessKind::Write, err));
+        }
         _ => return Err(EvalError::Backend(InterpreterError::UnsupportedIr)),
     };
     locals.insert(out, Local::Data(value));

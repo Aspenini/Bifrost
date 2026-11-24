@@ -96,6 +96,7 @@ impl Arm64Lifter {
         let mut ir = Builder {
             pc,
             instructions: Vec::new(),
+            next_id: 0,
         };
         let exit = match instruction.operation() {
             Operation::Nop => ir.next(next),
@@ -269,7 +270,20 @@ impl Arm64Lifter {
                 base,
                 offset,
                 load,
+            }
+            | Operation::DoublePair {
+                first,
+                second,
+                base,
+                offset,
+                load,
             } => {
+                let double = matches!(instruction.operation(), Operation::DoublePair { .. });
+                let layout = if double {
+                    MemoryLayout::I64_PAIR_LE
+                } else {
+                    QWORD
+                };
                 let base = ir.read(base);
                 let address = ir.with_immediate(IntOp::Add, base, offset);
                 let address = ir.address(address);
@@ -283,9 +297,27 @@ impl Arm64Lifter {
                     out,
                     address,
                     access,
-                    layout: QWORD,
+                    layout,
                 });
-                if load {
+                if double && load {
+                    let low = ir.fresh_value();
+                    let high = ir.fresh_value();
+                    ir.emit(Op::LoadPair64 {
+                        first: low,
+                        second: high,
+                        guard,
+                    });
+                    ir.write(first, low);
+                    ir.write(second, high);
+                } else if double {
+                    let first = ir.read(first);
+                    let second = ir.read(second);
+                    ir.emit(Op::StorePair64 {
+                        first,
+                        second,
+                        guard,
+                    });
+                } else if load {
                     let pair = ir.value(|out| Op::Load {
                         out,
                         guard,
@@ -383,6 +415,7 @@ impl Arm64Lifter {
 struct Builder {
     pc: GuestAddress,
     instructions: Vec<Instruction>,
+    next_id: u32,
 }
 
 impl Builder {
@@ -391,9 +424,15 @@ impl Builder {
     }
 
     fn value(&mut self, make: impl FnOnce(ValueId) -> Op) -> ValueId {
-        let out = ValueId(self.instructions.len() as u32);
+        let out = self.fresh_value();
         self.emit(make(out));
         out
+    }
+
+    fn fresh_value(&mut self) -> ValueId {
+        let id = ValueId(self.next_id);
+        self.next_id += 1;
+        id
     }
 
     fn constant(&mut self, ty: Type, bits: u64) -> ValueId {

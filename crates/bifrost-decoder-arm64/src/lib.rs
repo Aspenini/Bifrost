@@ -114,6 +114,13 @@ pub enum Operation {
         offset: u64,
         load: bool,
     },
+    DoublePair {
+        first: Reg,
+        second: Reg,
+        base: Reg,
+        offset: u64,
+        load: bool,
+    },
     Branch {
         target: GuestAddress,
         link: bool,
@@ -458,18 +465,29 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
             };
         }
     }
-    if word & 0xff80_0000 == 0x2900_0000 && lhs != Reg::Zero {
+    if word & 0x7f80_0000 == 0x2900_0000 && lhs != Reg::Zero {
         let load = word & (1 << 22) != 0;
         let second = reg(word >> 10, false);
         if load && dst == second {
             return Operation::Unsupported;
         }
-        return Operation::WordPair {
-            first: dst,
-            second,
-            base: lhs,
-            offset: (sign_extend(word >> 15, 7) * 4) as u64,
-            load,
+        let imm = sign_extend(word >> 15, 7);
+        return if word >> 31 == 0 {
+            Operation::WordPair {
+                first: dst,
+                second,
+                base: lhs,
+                offset: (imm * 4) as u64,
+                load,
+            }
+        } else {
+            Operation::DoublePair {
+                first: dst,
+                second,
+                base: lhs,
+                offset: (imm * 8) as u64,
+                load,
+            }
         };
     }
     if word & 0x7c00_0000 == 0x1400_0000 {

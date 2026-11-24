@@ -372,6 +372,29 @@ impl Values {
                 self.expect(value, layout.ty)?;
                 return self.consume_guard(guard, MemoryAccess::Write, layout, pc);
             }
+            Op::LoadPair64 {
+                first,
+                second,
+                guard,
+            } => {
+                self.consume_guard(guard, MemoryAccess::Read, MemoryLayout::I64_PAIR_LE, pc)?;
+                self.define(first, Value::Data(Type::I64))?;
+                (second, Type::I64)
+            }
+            Op::StorePair64 {
+                first,
+                second,
+                guard,
+            } => {
+                self.expect(first, Type::I64)?;
+                self.expect(second, Type::I64)?;
+                return self.consume_guard(
+                    guard,
+                    MemoryAccess::Write,
+                    MemoryLayout::I64_PAIR_LE,
+                    pc,
+                );
+            }
         };
         self.define(out, Value::Data(ty))
     }

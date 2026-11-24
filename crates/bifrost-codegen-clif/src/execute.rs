@@ -21,6 +21,7 @@ struct Frame {
     next_pc: u64,
     detail: u64,
     helper_value: u64,
+    helper_high: u64,
 }
 
 const _: () = {
@@ -28,6 +29,7 @@ const _: () = {
     assert!(offset_of!(Frame, next_pc) == lower::NEXT_PC as usize);
     assert!(offset_of!(Frame, detail) == lower::FAULT_DETAIL as usize);
     assert!(offset_of!(Frame, helper_value) == lower::HELPER_VALUE as usize);
+    assert!(offset_of!(Frame, helper_high) == lower::HELPER_HIGH as usize);
 };
 
 type Helper = unsafe extern "C" fn(*mut Frame, *mut c_void, u64, u64, u32) -> u32;
@@ -119,6 +121,7 @@ impl<Image: ExecutableImage> PublishedBlock<Image> {
             next_pc: pc.0,
             detail: 0,
             helper_value: 0,
+            helper_high: 0,
         };
         match &thread.cpu {
             CpuState::X86_64(state) => {
@@ -218,11 +221,13 @@ unsafe extern "C" fn access_memory(
     // That code forwards the live pointers without modification.
     let (frame, context) = unsafe { (&mut *frame, &mut *context.cast::<MemoryContext<'_>>()) };
     let call = catch_unwind(AssertUnwindSafe(|| {
+        let value = u128::from(value) | (u128::from(frame.helper_high) << 64);
         context.access(GuestAddress(address), value, options)
     }));
     match call {
         Ok(Ok(value)) => {
-            frame.helper_value = value;
+            frame.helper_value = value as u64;
+            frame.helper_high = (value >> 64) as u64;
             0
         }
         Ok(Err(error)) => {
@@ -240,9 +245,9 @@ impl MemoryContext<'_> {
     fn access(
         &mut self,
         address: GuestAddress,
-        value: u64,
+        value: u128,
         options: u32,
-    ) -> Result<u64, HelperError> {
+    ) -> Result<u128, HelperError> {
         let width = NonZeroU8::new(options as u8).expect("generated width is nonzero");
         let alignment =
             NonZeroU8::new((options >> 8) as u8).expect("generated alignment is nonzero");
@@ -265,7 +270,7 @@ impl MemoryContext<'_> {
         )?;
 
         let width = usize::from(width.get());
-        let start = if big_endian { 8 - width } else { 0 };
+        let start = if big_endian { 16 - width } else { 0 };
         let range = start..start + width;
         let result = if write {
             let bytes = if big_endian {
@@ -275,12 +280,12 @@ impl MemoryContext<'_> {
             };
             self.memory.write(address, &bytes[range]).map(|()| 0)
         } else {
-            let mut bytes = [0; 8];
+            let mut bytes = [0; 16];
             self.memory.read(address, &mut bytes[range]).map(|()| {
                 if big_endian {
-                    u64::from_be_bytes(bytes)
+                    u128::from_be_bytes(bytes)
                 } else {
-                    u64::from_le_bytes(bytes)
+                    u128::from_le_bytes(bytes)
                 }
             })
         };

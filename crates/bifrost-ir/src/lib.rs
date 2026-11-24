@@ -200,6 +200,14 @@ pub struct MemoryLayout {
     pub endian: Endian,
 }
 
+impl MemoryLayout {
+    pub const I64_PAIR_LE: Self = Self {
+        ty: Type::I128,
+        alignment: 1,
+        endian: Endian::Little,
+    };
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum Op {
@@ -280,6 +288,18 @@ pub enum Op {
         guard: ValueId,
         value: ValueId,
         layout: MemoryLayout,
+    },
+    /// Read one contiguous 16-byte range into two little-endian scalar values.
+    LoadPair64 {
+        first: ValueId,
+        second: ValueId,
+        guard: ValueId,
+    },
+    /// Write two little-endian scalar values as one contiguous 16-byte range.
+    StorePair64 {
+        first: ValueId,
+        second: ValueId,
+        guard: ValueId,
     },
 }
 

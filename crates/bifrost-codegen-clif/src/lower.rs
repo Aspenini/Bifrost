@@ -20,6 +20,7 @@ pub(crate) const FLAGS: i32 = 32 * 8;
 pub(crate) const NEXT_PC: i32 = 33 * 8;
 pub(crate) const FAULT_DETAIL: i32 = 34 * 8;
 pub(crate) const HELPER_VALUE: i32 = 35 * 8;
+pub(crate) const HELPER_HIGH: i32 = 36 * 8;
 pub(crate) const DISPATCH: i64 = 0;
 pub(crate) const NONCANONICAL: i64 = 1;
 pub(crate) const ILLEGAL: i64 = 2;
@@ -243,6 +244,9 @@ impl Lowering<'_> {
                 return Ok(());
             }
             Op::Load { out, guard, layout } => {
+                if layout.ty.bit_width() > 64 {
+                    return Err(self.unsupported("memory width"));
+                }
                 let zero = self.immediate(0);
                 self.memory_access(guard, zero, layout, false)?;
                 let value = self.builder.ins().load(
@@ -258,7 +262,41 @@ impl Lowering<'_> {
                 value,
                 layout,
             } => {
+                if layout.ty.bit_width() > 64 {
+                    return Err(self.unsupported("memory width"));
+                }
                 return self.memory_access(guard, self.values[&value].value, layout, true);
+            }
+            Op::LoadPair64 {
+                first,
+                second,
+                guard,
+            } => {
+                let zero = self.immediate(0);
+                self.memory_access(guard, zero, MemoryLayout::I64_PAIR_LE, false)?;
+                for (out, offset) in [(first, HELPER_VALUE), (second, HELPER_HIGH)] {
+                    let value = self.builder.ins().load(
+                        types::I64,
+                        MemFlagsData::trusted(),
+                        self.frame,
+                        offset,
+                    );
+                    self.values.insert(out, Scalar { value, width: 64 });
+                }
+                return Ok(());
+            }
+            Op::StorePair64 {
+                first,
+                second,
+                guard,
+            } => {
+                self.store(HELPER_HIGH, self.values[&second].value);
+                return self.memory_access(
+                    guard,
+                    self.values[&first].value,
+                    MemoryLayout::I64_PAIR_LE,
+                    true,
+                );
             }
             _ => return Err(self.unsupported("IR operation")),
         };
@@ -281,7 +319,7 @@ impl Lowering<'_> {
         let width = layout
             .ty
             .storage_bytes()
-            .filter(|&size| size <= 8)
+            .filter(|&size| size <= 16)
             .ok_or_else(|| self.unsupported("memory width"))?;
         let mut options = u32::from(width) | (u32::from(layout.alignment) << 8);
         options |= u32::from(layout.endian == Endian::Big) << 16;
