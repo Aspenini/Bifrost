@@ -26,6 +26,14 @@ pub enum Logical {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RegisterShift {
+    Left,
+    LogicalRight,
+    ArithmeticRight,
+    RotateRight,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum Operation {
     Nop,
@@ -69,6 +77,16 @@ pub enum Operation {
         dst: Reg,
         src: Reg,
         mask: u64,
+        word: bool,
+    },
+    LogicalRegister {
+        kind: Logical,
+        dst: Reg,
+        lhs: Reg,
+        rhs: Reg,
+        shift: RegisterShift,
+        amount: u8,
+        invert: bool,
         word: bool,
     },
     Memory {
@@ -269,6 +287,15 @@ fn logical_immediate_mask(instruction: u32, bits: u32) -> Option<u64> {
     Some(mask)
 }
 
+fn logical_kind(word: u32) -> Logical {
+    match (word >> 29) & 3 {
+        0 => Logical::And,
+        1 => Logical::Orr,
+        2 => Logical::Eor,
+        _ => Logical::Ands,
+    }
+}
+
 fn operation(word: u32, pc: GuestAddress) -> Operation {
     let dst = reg(word, false);
     let lhs = reg(word >> 5, false);
@@ -334,6 +361,29 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
         }
         _ => {}
     }
+    if word & 0x1f00_0000 == 0x0a00_0000 {
+        let narrow = word >> 31 == 0;
+        let amount = ((word >> 10) & 63) as u8;
+        if narrow && amount >= 32 {
+            return Operation::Undefined;
+        }
+        let shift = match (word >> 22) & 3 {
+            0 => RegisterShift::Left,
+            1 => RegisterShift::LogicalRight,
+            2 => RegisterShift::ArithmeticRight,
+            _ => RegisterShift::RotateRight,
+        };
+        return Operation::LogicalRegister {
+            kind: logical_kind(word),
+            dst,
+            lhs,
+            rhs: reg(word >> 16, false),
+            shift,
+            amount,
+            invert: word & (1 << 21) != 0,
+            word: narrow,
+        };
+    }
     if word & 0x1f80_0000 == 0x1100_0000 {
         let shift = if word & (1 << 22) == 0 { 0 } else { 12 };
         let rhs = Operand::Immediate(u64::from((word >> 10) & 0xfff) << shift);
@@ -346,12 +396,7 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
     }
     if word & 0x1f80_0000 == 0x1200_0000 {
         let narrow = word >> 31 == 0;
-        let kind = match (word >> 29) & 3 {
-            0 => Logical::And,
-            1 => Logical::Orr,
-            2 => Logical::Eor,
-            _ => Logical::Ands,
-        };
+        let kind = logical_kind(word);
         let Some(mask) = logical_immediate_mask(word, if narrow { 32 } else { 64 }) else {
             return Operation::Undefined;
         };

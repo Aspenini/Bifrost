@@ -253,7 +253,7 @@ fn narrow_memory_access_preserves_adjacent_bytes_and_zero_extends_loads() {
 }
 
 #[test]
-fn scalar_arithmetic_and_logical_immediates_use_the_correct_width_and_flags() {
+fn scalar_arithmetic_and_logic_use_the_correct_width_and_flags() {
     const NZCV: u32 = 0xa000_0000;
     // The inputs carry nonzero high halves to catch accidental 64-bit arithmetic.
     for (word, lhs, rhs, expected, flags) in [
@@ -279,6 +279,11 @@ fn scalar_arithmetic_and_logical_immediates_use_the_correct_width_and_flags() {
         (0x1b02_fc20, 2, 3, 0xffff_fffa, NZCV),        // mneg w0,w1,w2
         (0x9b02_0c20, 2, 3, 0x27d0_8e36_0000_000d, NZCV), // madd x0,x1,x2,x3
         (0x9b02_8c20, 2, 3, 0xd82f_71ca_0000_0001, NZCV), // msub x0,x1,x2,x3
+        (0xaa02_8020, 3, 1, 0xabcd_1235_0000_0003, NZCV), // orr x0,x1,x2,lsl #32
+        (0x2a82_07e0, 0, 0x8000_0000, 0xc000_0000, NZCV), // orr w0,wzr,w2,asr #1
+        (0x4ac2_0420, 2, 1, 0x8000_0002, NZCV),        // eor w0,w1,w2,ror #1
+        (0x0a42_1020, 0xff, 0xdeb0, 0xeb, NZCV),       // and w0,w1,w2,lsr #4
+        (0x6a22_0420, 2, 1, 0, 0x4000_0000),           // bics w0,w1,w2,lsl #1
     ] {
         let (mut memory, mut thread) = memory_and_thread(&[word], Protection::ReadWrite);
         let CpuState::AArch64(cpu) = &mut thread.cpu else {

@@ -5,7 +5,7 @@ use bifrost_core::{
     GuestTarget, TargetError,
 };
 use bifrost_decoder_arm64::{
-    DecodeError, DecodedInstruction, Logical, Operand, Operation, Reg, fetch,
+    DecodeError, DecodedInstruction, Logical, Operand, Operation, Reg, RegisterShift, fetch,
 };
 use bifrost_ir::*;
 use std::fmt;
@@ -124,21 +124,28 @@ impl Arm64Lifter {
                 mask,
                 word,
             } => {
-                let op = match kind {
-                    Logical::And | Logical::Ands => IntOp::And,
-                    Logical::Orr => IntOp::Or,
-                    Logical::Eor => IntOp::Xor,
-                };
-                let source = ir.read(src);
-                let mut result = ir.with_immediate(op, source, mask);
-                if word {
-                    result = ir.with_immediate(IntOp::And, result, u64::from(u32::MAX));
+                let lhs = ir.read(src);
+                let rhs = ir.integer(mask);
+                ir.logical(kind, dst, lhs, rhs, word);
+                ir.next(next)
+            }
+            Operation::LogicalRegister {
+                kind,
+                dst,
+                lhs,
+                rhs,
+                shift,
+                amount,
+                invert,
+                word,
+            } => {
+                let lhs = ir.read(lhs);
+                let rhs = ir.read(rhs);
+                let mut rhs = ir.shift_register(rhs, shift, amount, word);
+                if invert {
+                    rhs = ir.with_immediate(IntOp::Xor, rhs, u64::MAX);
                 }
-                if kind == Logical::Ands {
-                    let flags = ir.nz_flags(result, if word { 0 } else { 32 });
-                    ir.write_flags(flags);
-                }
-                ir.write(dst, result);
+                ir.logical(kind, dst, lhs, rhs, word);
                 ir.next(next)
             }
             Operation::Arithmetic {
@@ -476,6 +483,59 @@ impl Builder {
 
     fn cast(&mut self, value: ValueId, ty: Type) -> ValueId {
         self.value(|out| Op::IntCast { out, value, ty })
+    }
+
+    fn shift_register(
+        &mut self,
+        value: ValueId,
+        shift: RegisterShift,
+        amount: u8,
+        word: bool,
+    ) -> ValueId {
+        if amount == 0 {
+            return value;
+        }
+        let value = if word {
+            self.cast(value, Type::I32)
+        } else {
+            value
+        };
+        let count = self.integer(u64::from(amount));
+        let op = match shift {
+            RegisterShift::Left => ShiftOp::Left,
+            RegisterShift::LogicalRight => ShiftOp::LogicalRight,
+            RegisterShift::ArithmeticRight => ShiftOp::ArithmeticRight,
+            RegisterShift::RotateRight => ShiftOp::RotateRight,
+        };
+        let result = self.value(|out| Op::Shift {
+            out,
+            value,
+            count,
+            op,
+            rule: ShiftCount::ModuloWidth,
+        });
+        if word {
+            self.cast(result, Type::I64)
+        } else {
+            result
+        }
+    }
+
+    fn logical(&mut self, kind: Logical, dst: Reg, lhs: ValueId, rhs: ValueId, word: bool) {
+        let op = match kind {
+            Logical::And | Logical::Ands => IntOp::And,
+            Logical::Orr => IntOp::Or,
+            Logical::Eor => IntOp::Xor,
+        };
+        let mut result = self.binary(op, lhs, rhs);
+        if word {
+            result = self.with_immediate(IntOp::And, result, u64::from(u32::MAX));
+        }
+        if kind == Logical::Ands {
+            let flags = self.nz_flags(result, if word { 0 } else { 32 });
+            self.write_flags(flags);
+        }
+        self.write(dst, result);
     }
 
     fn shifted_mask(&mut self, value: ValueId, shift: u64, mask: u64) -> ValueId {

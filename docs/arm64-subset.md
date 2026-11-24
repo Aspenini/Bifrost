@@ -8,7 +8,7 @@ The raw profile uses little-endian A64 instructions and serialized execution ove
 | Arithmetic | 32-bit and 64-bit ADD, ADDS, SUB, SUBS with imm12 (optional LSL #12) or register LSL #0, including CMP/CMN and immediate moves to/from WSP or SP |
 | Multiply | 32-bit and 64-bit MADD and MSUB, including MUL and MNEG |
 | Address generation | ADR and ADRP |
-| Logical | 32-bit and 64-bit AND, ORR, EOR and ANDS with a bitmask immediate |
+| Logical | 32-bit and 64-bit AND, ORR, EOR and ANDS with a bitmask immediate or shifted register, plus shifted-register BIC, ORN, EON and BICS |
 | Memory | 32-bit and 64-bit unsigned scaled immediate LDR/STR, 32-bit signed unscaled immediate LDUR/STUR, unsigned immediate LDRB/STRB, and signed unscaled immediate LDURB/STURB with Xn base |
 | Paired memory | 32-bit signed-offset LDP/STP with Xn base, distinct LDP destinations, and no writeback |
 | Branch | B, BL, B.cond, 64-bit CBZ/CBNZ, RET Xn |
