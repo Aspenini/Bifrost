@@ -13,6 +13,7 @@
 | Cranelift JIT and executable-memory publisher | Partial, Windows and Linux x86-64/ARM64 with `jit-cranelift` and executable mappings permitted |
 | Native fast paths | Unavailable |
 | Linux ELF and syscall provider | Partial, static x86-64 images, initial stack, read-only mounts and core syscalls. Enable `linux-elf`. |
+| Cooperative Linux threads | Rust embedding with host-enrolled x86-64 threads, guarded stacks, and interpreter/JIT parity |
 | Windows PE and API provider | Partial, fixed-base x86-64 console images and named Win32/NT calls. Enable `windows-pe`. |
 | Mach-O inspection | Experimental, thin little-endian x86-64 and ARM64 executables. See the [research scope](research.md). |
 | ABI bridge | Partial, four guest ABI descriptors with fixed signatures and synchronous callbacks. Enable `abi-bridge`. |
@@ -33,3 +34,13 @@ The native baseline results above are from commit `618b05e`. [Workspace CI](http
 Rust embedders can enroll additional threads before starting a Linux guest. They run cooperatively with synthetic process and thread IDs and one shared instruction budget. Guest-created threads, signals, and Windows exception delivery are outside this profile. The CLI and C API use one guest thread. macOS and the C interface use the interpreter. [Thread lifecycle](execution-model.md)
 
 Run `cargo run --locked -p bifrost-cli --features "bifrost-runtime/guest-x86_64,bifrost-runtime/guest-aarch64,bifrost-runtime/interp,bifrost-runtime/jit-cranelift" -- capabilities` to check both guest profiles and backends. A reserved feature reports its compiled crate boundary as implemented=false, available=false, and validated=false.
+
+## Verify the Phase 7 runtime
+
+```sh
+cargo test --locked -p bifrost-runtime --all-features --test threads --test image_mutations
+cargo test --locked -p bifrost-os-linux
+cargo deny --locked --all-features check advisories licenses
+```
+
+The thread fixture tests independent stacks, shared memory, yield and preemption, and exit, fault, and budget behavior. Windows and Linux JIT hosts also compare the full scheduling trace against the interpreter. The image mutation test exercises inspection of bounded changes to the self-authored ELF, PE, and Mach-O fixtures. The workspace CI runs these tests on the six host profiles above.

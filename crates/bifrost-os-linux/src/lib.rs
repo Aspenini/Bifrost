@@ -12,6 +12,8 @@ const ENOENT: i64 = -2;
 const EACCES: i64 = -13;
 const EIO: i64 = -5;
 const EMFILE: i64 = -24;
+const ESPIPE: i64 = -29;
+const EOVERFLOW: i64 = -75;
 const MAX_IO: u64 = 65536;
 
 pub struct Io<'a> {
@@ -51,14 +53,14 @@ pub enum ThreadSyscall {
 }
 struct File {
     data: Arc<[u8]>,
-    offset: usize,
+    offset: i64,
 }
 
 pub struct Linux<'a> {
     io: Io<'a>,
     vfs: &'a Vfs,
     files: BTreeMap<u64, File>,
-    input_offset: usize,
+    input_offset: i64,
     closed_standard: [bool; 3],
 }
 
@@ -99,6 +101,7 @@ impl<'a> Linux<'a> {
             0 => self.read(arg0, GuestAddress(arg1), arg2, memory),
             1 => self.write(arg0, GuestAddress(arg1), arg2, memory),
             3 => self.close(arg0),
+            8 => self.seek(arg0, arg1 as i64, arg2),
             24 => 0, // sched_yield
             39 => 1, // Synthetic process ID.
             60 => return Ok(ThreadSyscall::ExitThread(arg0 as u8)),
@@ -157,16 +160,42 @@ impl<'a> Linux<'a> {
         } else {
             return EBADF;
         };
-        let len = (data.len() - *offset).min(count.min(MAX_IO) as usize);
-        if !valid_span(address, len)
-            || memory
-                .write(address, &data[*offset..*offset + len])
-                .is_err()
-        {
+        let start = usize::try_from(*offset)
+            .unwrap_or(usize::MAX)
+            .min(data.len());
+        let len = (data.len() - start).min(count.min(MAX_IO) as usize);
+        if !valid_span(address, len) || memory.write(address, &data[start..start + len]).is_err() {
             return EFAULT;
         }
-        *offset += len;
+        *offset += len as i64;
         len as i64
+    }
+
+    fn seek(&mut self, fd: u64, offset: i64, origin: u64) -> i64 {
+        if fd < 3 {
+            return if self.closed_standard[fd as usize] {
+                EBADF
+            } else {
+                ESPIPE
+            };
+        }
+        let Some(file) = self.files.get_mut(&fd) else {
+            return EBADF;
+        };
+        let base = match origin {
+            0 => 0,
+            1 => file.offset,
+            2 => file.data.len() as i64,
+            _ => return EINVAL,
+        };
+        let Some(position) = base.checked_add(offset) else {
+            return EOVERFLOW;
+        };
+        if position < 0 {
+            return EINVAL;
+        }
+        file.offset = position;
+        position
     }
 
     fn close(&mut self, fd: u64) -> i64 {

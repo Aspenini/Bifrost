@@ -8,6 +8,13 @@ permissions:
   contents: read
 
 jobs:
+  dependency-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo install --locked --version 0.22.0 cargo-deny
+      - run: cargo deny --locked --all-features check advisories licenses
+
   verify:
     strategy:
       matrix:

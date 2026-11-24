@@ -37,13 +37,26 @@ fn mounted_files_and_streams_use_guest_descriptors_and_checked_memory() {
     assert_eq!(call(0, fd as u64, 0x1fff, 5).1, -14);
     assert_eq!(call(0, fd as u64, 0x2100, 5).1, 5);
     assert_eq!(call(1, 1, 0x2100, 5).1, 5);
+    assert_eq!(call(8, fd as u64, 0, 1).1, 5);
+    assert_eq!(call(8, fd as u64, 15, 2).1, 20);
+    assert_eq!(call(0, fd as u64, 0x2100, 5).1, 0);
+    assert_eq!(call(8, fd as u64, 0, 1).1, 20);
+    assert_eq!(call(8, fd as u64, (-2_i64) as u64, 2).1, 3);
+    assert_eq!(call(0, fd as u64, 0x2200, 5).1, 2);
+    assert_eq!(call(8, fd as u64, (-6_i64) as u64, 1).1, -22);
+    assert_eq!(call(8, fd as u64, i64::MAX as u64, 1).1, -75);
+    assert_eq!(call(8, fd as u64, 0, 1).1, 5);
+    assert_eq!(call(8, 1, 0, 0).1, -29);
     assert_eq!(call(3, fd as u64, 0, 0).1, 0);
+    assert_eq!(call(8, fd as u64, 0, 0).1, -9);
     assert_eq!(call(0, fd as u64, 0x2100, 1).1, -9);
     assert_eq!(call(231, 42, 0, 0).0, SyscallExit::Exit(42));
     assert_eq!(out, b"hello");
     let mut bytes = [0; 5];
     memory.read(Addr(0x2100), &mut bytes).unwrap();
     assert_eq!(&bytes, b"hello");
+    memory.read(Addr(0x2200), &mut bytes[..2]).unwrap();
+    assert_eq!(&bytes[..2], b"lo");
 }
 
 #[test]
