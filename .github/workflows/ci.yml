@@ -18,7 +18,7 @@ jobs:
   verify:
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, ubuntu-24.04-arm, windows-11-arm, macos-15, macos-15-intel]
+        os: [ubuntu-latest, windows-latest, ubuntu-24.04-arm, windows-11-arm, macos-26, macos-15-intel]
     runs-on: ${{ matrix.os }}
     env:
       RUSTDOCFLAGS: -D warnings
