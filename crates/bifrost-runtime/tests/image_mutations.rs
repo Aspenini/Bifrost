@@ -10,11 +10,20 @@ use bifrost_runtime::process::inspect;
 fn image_inspection_handles_deterministic_mutations_and_truncations() {
     for fixture in [
         &include_bytes!("../../../tests/fixtures/linux/threads.elf")[..],
+        &include_bytes!("../../../tests/fixtures/linux/pie.elf")[..],
+        &include_bytes!("../../../tests/fixtures/macho/universal.macho")[..],
         &include_bytes!("../../../tests/fixtures/windows/hello.exe")[..],
         &include_bytes!("../../../tests/fixtures/macho/entry-x86_64.macho")[..],
         &include_bytes!("../../../tests/fixtures/macho/entry-arm64.macho")[..],
     ] {
-        assert!(inspect(fixture).is_ok());
+        let accepts = |image: &[u8]| {
+            if bifrost_runtime::macho::is_universal(image) {
+                bifrost_runtime::macho::inspect_universal(image).is_ok()
+            } else {
+                inspect(image).is_ok()
+            }
+        };
+        assert!(accepts(fixture));
         let mut mutated = fixture.to_vec();
         let mut accepted = 0;
         let mut rejected = 0;
@@ -23,7 +32,7 @@ fn image_inspection_handles_deterministic_mutations_and_truncations() {
             let original = fixture[offset];
             for value in [0, u8::MAX, original ^ 0x80] {
                 mutated[offset] = value;
-                if inspect(&mutated).is_ok() {
+                if accepts(&mutated) {
                     accepted += 1;
                 } else {
                     rejected += 1;
@@ -33,7 +42,7 @@ fn image_inspection_handles_deterministic_mutations_and_truncations() {
         }
         assert!(accepted > 0 && rejected > 0);
         for end in (0..fixture.len().min(768)).chain((768..fixture.len()).step_by(19)) {
-            let _ = inspect(&fixture[..end]);
+            accepts(&fixture[..end]);
         }
     }
 }

@@ -12,7 +12,7 @@
 | Bare ARM64 execution | Partial, enable `guest-aarch64` and `interp` or `jit-cranelift`. See the [instruction subset](arm64-subset.md). |
 | Cranelift JIT and executable-memory publisher | Partial, Windows and Linux x86-64/ARM64 with `jit-cranelift` and executable mappings permitted |
 | Native fast paths | Unavailable |
-| Linux ELF and syscall provider | Partial, static x86-64 images, initial stack, read-only mounts and core syscalls. Enable `linux-elf`. |
+| Linux ELF and syscall provider | Partial, static x86-64 ET_EXEC and relative-relocation PIE images, initial stack, read-only mounts and core syscalls. Enable `linux-elf`. |
 | Cooperative Linux threads | Rust embedding with host-enrolled x86-64 threads, guarded stacks, and interpreter/JIT parity |
 | Windows PE and API provider | Partial, fixed-base x86-64 console images and named Win32/NT calls. Enable `windows-pe`. |
 | Mach-O inspection | Experimental, thin and universal x86-64/ARM64 executables, plus ARM64e slice identification. See the [research scope](research.md). |

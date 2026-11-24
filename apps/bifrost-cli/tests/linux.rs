@@ -7,6 +7,25 @@ fn fixture(name: &str) -> std::path::PathBuf {
 }
 
 #[test]
+fn runs_a_static_pie_with_a_relative_relocation() {
+    let path = fixture("pie.elf");
+    for mode in ["interp", "auto"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_bifrost"))
+            .args(["run", "--exec", mode])
+            .arg(&path)
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(44),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(output.stdout, b"Hello from Bifrost PIE!\n");
+    }
+}
+
+#[test]
 fn inspects_and_runs_the_static_elf() {
     let path = fixture("hello.elf");
     let tool = env!("CARGO_BIN_EXE_bifrost");

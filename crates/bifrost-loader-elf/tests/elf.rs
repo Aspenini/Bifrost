@@ -4,6 +4,48 @@ use bifrost_loader_elf::parse;
 use bifrost_memory::GuestMemoryRead;
 
 const FIXTURE: &[u8] = include_bytes!("../../../tests/fixtures/linux/hello.elf");
+const PIE: &[u8] = include_bytes!("../../../tests/fixtures/linux/pie.elf");
+
+#[test]
+fn rebases_pie_pointer_before_protecting_relro() {
+    use bifrost_core::GuestMemory;
+    let parsed = parse(PIE).unwrap();
+    let base = parsed.image.metadata.entry.0 - 0x1000;
+    assert_ne!(base, 0);
+    let (mut memory, state) = parsed.start(&[], &[]).unwrap();
+    assert_eq!(state.rip.0, base + 0x1000);
+    let pointer = GuestAddress(base + 0x2000);
+    let mut value = [0; 8];
+    memory.read(pointer, &mut value).unwrap();
+    let address = GuestAddress(u64::from_le_bytes(value));
+    let mut message = [0; 24];
+    memory.read(address, &mut message).unwrap();
+    assert_eq!(&message, b"Hello from Bifrost PIE!\n");
+    assert!(memory.write(pointer, &[1]).is_err());
+}
+
+#[test]
+fn rejects_unsupported_dynamic_tags_and_relocation_targets() {
+    let mut tagged = PIE.to_vec();
+    // Replace the first dynamic tag with DT_NEEDED, which requires a guest linker.
+    tagged[0x2008..0x2010].copy_from_slice(&1_u64.to_le_bytes());
+    assert!(matches!(
+        parse(&tagged),
+        Err(LoadError::Unsupported("ELF dynamic dependency or tag"))
+    ));
+
+    let mut executable_target = PIE.to_vec();
+    // Redirect R_X86_64_RELATIVE to the executable segment.
+    executable_target[0x210..0x218].copy_from_slice(&0x1000_u64.to_le_bytes());
+    assert!(matches!(
+        parse(&executable_target),
+        Err(LoadError::Invalid("ELF relocation destination"))
+    ));
+
+    let mut symbol = PIE.to_vec();
+    symbol[0x218..0x220].copy_from_slice(&0x1_0000_0008_u64.to_le_bytes());
+    assert!(matches!(parse(&symbol), Err(LoadError::Unsupported(_))));
+}
 
 #[test]
 fn validates_headers_and_builds_a_linux_process_stack() {

@@ -25,7 +25,7 @@ The specification lists optional research projects with separate scopes.
 | --- | --- |
 | macOS guest execution | Establish startup and dylib policy, then compare self-authored guest fixtures on macOS host hardware. |
 | ARM64e | Establish pointer authentication and ABI behavior against native fixtures. |
-| Advanced Linux userspace | Verify relocations and guest linker state with self-authored position-independent fixtures before extending syscall coverage. |
+| Advanced Linux userspace | Static PIE and relative relocations are tested. Guest linking, shared libraries and TLS need separate fixtures. See the [Linux profile](linux-elf.md). |
 | x86-32 or RISC-V and additional backends | Establish a declared instruction subset and a deterministic differential corpus. |
 | Android hosts | Check target page sizes, executable memory policy, and the interpreter on an actual device. |
 | Dynamic plugins | Define a versioned interface, lifetime rules, and dependency policy. |

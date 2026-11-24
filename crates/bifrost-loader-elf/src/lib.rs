@@ -1,4 +1,6 @@
-//! Static ELF64 images for the initial Linux x86-64 process profile.
+//! Static ELF64 images for the Linux x86-64 process profile.
+mod pie;
+
 use bifrost_core::{GuestAddress, GuestIsa, GuestMemory, Protection, X86State};
 use bifrost_loader::{
     Format, Image, LoadError, Metadata, PAGE, Segment, slice, u16_at, u32_at, u64_at,
@@ -12,6 +14,7 @@ pub struct Elf<'a> {
     pub image: Image<'a>,
     phdr: Option<u64>,
     phnum: u16,
+    pie: Option<pie::Rebase>,
 }
 
 pub fn parse(bytes: &[u8]) -> Result<Elf<'_>, LoadError> {
@@ -21,16 +24,25 @@ pub fn parse(bytes: &[u8]) -> Result<Elf<'_>, LoadError> {
     if !matches!(slice(bytes, 7, 1)?[0], 0 | 3) {
         return Err(LoadError::Unsupported("ELF OS ABI"));
     }
-    if u16_at(bytes, 16)? != 2 || u16_at(bytes, 18)? != 62 {
-        return Err(LoadError::Unsupported("requires static x86-64 ET_EXEC"));
+    let kind = u16_at(bytes, 16)?;
+    if !matches!(kind, 2 | 3) || u16_at(bytes, 18)? != 62 {
+        return Err(LoadError::Unsupported(
+            "requires static x86-64 ET_EXEC or PIE",
+        ));
     }
     if u32_at(bytes, 20)? != 1 || u16_at(bytes, 52)? != 64 || u16_at(bytes, 54)? != 56 {
         return Err(LoadError::Invalid("ELF header sizes or version"));
     }
+    let bias = if kind == 3 { pie::LOAD_BIAS } else { 0 };
+    let rebase = |address: u64| {
+        address
+            .checked_add(bias)
+            .ok_or(LoadError::Invalid("ELF virtual address"))
+    };
     let metadata = Metadata {
         format: Format::Elf,
         isa: GuestIsa::X86_64,
-        entry: GuestAddress(u64_at(bytes, 24)?),
+        entry: GuestAddress(rebase(u64_at(bytes, 24)?)?),
     };
     let phoff = u64_at(bytes, 32)?;
     let phnum = u16_at(bytes, 56)?;
@@ -41,10 +53,34 @@ pub fn parse(bytes: &[u8]) -> Result<Elf<'_>, LoadError> {
     let headers = slice(bytes, phoff, phbytes)?;
     let mut segments = Vec::new();
     let mut phdr = None;
+    let mut dynamic = None;
+    let mut relro = None;
     for header in headers.chunks_exact(56) {
         let kind = u32_at(header, 0)?;
         let flags = u32_at(header, 4)?;
         match kind {
+            2 if bias != 0 => {
+                let offset = u64_at(header, 8)?;
+                let addr = rebase(u64_at(header, 16)?)?;
+                let size = u64_at(header, 32)?;
+                if size != u64_at(header, 40)?
+                    || dynamic
+                        .replace((addr, slice(bytes, offset, size)?))
+                        .is_some()
+                {
+                    return Err(LoadError::Invalid("ELF dynamic segment"));
+                }
+                continue;
+            }
+            0x6474_e552 if bias != 0 => {
+                if relro
+                    .replace((rebase(u64_at(header, 16)?)?, u64_at(header, 40)?))
+                    .is_some()
+                {
+                    return Err(LoadError::Invalid("duplicate ELF RELRO segment"));
+                }
+                continue;
+            }
             2 | 3 | 7 => {
                 return Err(LoadError::Unsupported(
                     "ELF dynamic linking, interpreter or TLS",
@@ -57,7 +93,7 @@ pub fn parse(bytes: &[u8]) -> Result<Elf<'_>, LoadError> {
             _ => continue,
         }
         let offset = u64_at(header, 8)?;
-        let address = u64_at(header, 16)?;
+        let address = rebase(u64_at(header, 16)?)?;
         let filesz = u64_at(header, 32)?;
         let size = u64_at(header, 40)?;
         let alignment = u64_at(header, 48)?;
@@ -97,10 +133,19 @@ pub fn parse(bytes: &[u8]) -> Result<Elf<'_>, LoadError> {
             protection,
         });
     }
+    let image = Image { metadata, segments };
+    let pie = if bias != 0 {
+        let (address, dynamic) =
+            dynamic.ok_or(LoadError::Unsupported("ELF PIE requires a dynamic table"))?;
+        Some(pie::Rebase::parse(&image, address, dynamic, relro)?)
+    } else {
+        None
+    };
     Ok(Elf {
-        image: Image { metadata, segments },
+        image,
         phdr,
         phnum,
+        pie,
     })
 }
 
@@ -114,6 +159,9 @@ impl Elf<'_> {
             return Err(LoadError::Unsupported("too many process arguments"));
         }
         let mut memory = self.image.map()?;
+        if let Some(pie) = &self.pie {
+            pie.apply(&mut memory)?;
+        }
         let base = STACK - STACK_SIZE;
         memory.map_guarded_stack(GuestAddress(base - PAGE), STACK_SIZE)?;
         let mut top = STACK;
