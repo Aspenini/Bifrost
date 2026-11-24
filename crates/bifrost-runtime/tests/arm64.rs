@@ -305,6 +305,14 @@ fn scalar_arithmetic_and_logic_use_the_correct_width_and_flags() {
         (0x4ac2_0420, 2, 1, 0x8000_0002, NZCV),        // eor w0,w1,w2,ror #1
         (0x0a42_1020, 0xff, 0xdeb0, 0xeb, NZCV),       // and w0,w1,w2,lsr #4
         (0x6a22_0420, 2, 1, 0, 0x4000_0000),           // bics w0,w1,w2,lsl #1
+        (0xd343_fc20, 8, 0, 0x1579_a246_8000_0001, NZCV), // lsr x0,x1,#3
+        (0x5318_5c20, 0x1234_5678, 0, 0x3456_7800, NZCV), // lsl w0,w1,#8
+        (0x1304_7c20, 0x8123_4567, 0, 0xf812_3456, NZCV), // asr w0,w1,#4
+        (0x9340_1c20, 0x80, 0, u64::MAX - 127, NZCV),  // sxtb x0,w1
+        (0x1318_1c20, 0x80, 0, 0xffff_8000, NZCV),     // sbfiz w0,w1,#8,#8
+        (0x5308_3c20, 0x1234, 0, 0x12, NZCV),          // ubfx w0,w1,#8,#8
+        (0x3318_1c20, 0x1234, 0, 0xffff_34ff, NZCV),   // bfi w0,w1,#8,#8
+        (0x3308_3c20, 0x1234, 0, 0xffff_ff12, NZCV),   // bfxil w0,w1,#8,#8
     ] {
         let (mut memory, mut thread) = memory_and_thread(&[word], Protection::ReadWrite);
         let CpuState::AArch64(cpu) = &mut thread.cpu else {
@@ -450,6 +458,50 @@ fn validates_arm64_feature_requirements_at_construction() {
             RawInterpreter::new(&target, &mut memory, &mut ()),
             Err(ExecutionError::UnsupportedTarget(_))
         ));
+    }
+}
+
+#[test]
+fn test_branches_use_the_selected_register_width_and_bit() {
+    for (word, value, displacement) in [
+        (0x3400_0041, 1 << 32, 8), // cbz w1, #8
+        (0x3500_0041, 1 << 32, 4), // cbnz w1, #8 (fall through)
+        (0x3500_0041, (1 << 32) | 1, 8),
+        (0xb6ff_ffe1, 1 << 62, -4), // tbz x1, #63, #-4
+        (0xb7f8_0041, 1 << 63, 8),  // tbnz x1, #63, #8
+        (0x3600_0041, 1, 4),        // tbz w1, #0, #8 (fall through)
+    ] {
+        let (mut memory, mut thread) = memory_and_thread(&[word], Protection::ReadWrite);
+        let CpuState::AArch64(cpu) = &mut thread.cpu else {
+            unreachable!()
+        };
+        cpu.x[1] = value;
+        cpu.nzcv = 0xf000_0000;
+        let mut expected = thread.clone();
+        let pc = Addr(CODE.0.wrapping_add_signed(displacement));
+        expected.cpu.set_pc(pc);
+        let exit = RawInterpreter::new(&target(), &mut memory, &mut ())
+            .unwrap()
+            .step(&mut thread)
+            .unwrap();
+        assert_eq!(exit, ExitReason::Dispatch(pc));
+        assert_eq!(thread, expected);
+        #[cfg(all(
+            feature = "jit-cranelift",
+            any(target_arch = "x86_64", target_arch = "aarch64"),
+            any(target_os = "linux", target_os = "windows")
+        ))]
+        {
+            use bifrost_runtime::raw::{RawJit, SystemJitMemory};
+            let mut jitted = expected.clone();
+            jitted.cpu.set_pc(CODE);
+            let actual = RawJit::new(&target(), &mut memory, &mut (), SystemJitMemory)
+                .unwrap()
+                .step(&mut jitted)
+                .unwrap();
+            assert_eq!(actual, exit);
+            assert_eq!(jitted, expected);
+        }
     }
 }
 

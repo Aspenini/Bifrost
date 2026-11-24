@@ -34,6 +34,13 @@ pub enum RegisterShift {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Bitfield {
+    Signed,
+    Merge,
+    Unsigned,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum Operation {
     Nop,
@@ -94,6 +101,15 @@ pub enum Operation {
         invert: bool,
         word: bool,
     },
+    Bitfield {
+        kind: Bitfield,
+        dst: Reg,
+        src: Reg,
+        src_start: u8,
+        dst_start: u8,
+        len: u8,
+        word: bool,
+    },
     Memory {
         reg: Reg,
         base: Reg,
@@ -145,6 +161,17 @@ pub enum Operation {
     BranchZero {
         target: GuestAddress,
         reg: Reg,
+        nonzero: bool,
+    },
+    BranchZeroWord {
+        target: GuestAddress,
+        reg: Reg,
+        nonzero: bool,
+    },
+    BranchBit {
+        target: GuestAddress,
+        reg: Reg,
+        bit: u8,
         nonzero: bool,
     },
     Return(Reg),
@@ -433,6 +460,35 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
             word: narrow,
         };
     }
+    if word & 0x1f80_0000 == 0x1300_0000 {
+        let narrow = word >> 31 == 0;
+        let width = if narrow { 32 } else { 64 };
+        let r = ((word >> 16) & 63) as u8;
+        let s = ((word >> 10) & 63) as u8;
+        if (word & (1 << 22) == 0) != narrow || r >= width || s >= width {
+            return Operation::Undefined;
+        }
+        let kind = match (word >> 29) & 3 {
+            0 => Bitfield::Signed,
+            1 => Bitfield::Merge,
+            2 => Bitfield::Unsigned,
+            _ => return Operation::Undefined,
+        };
+        let (src_start, dst_start, len) = if s < r {
+            (0, width - r, s + 1)
+        } else {
+            (r, 0, s - r + 1)
+        };
+        return Operation::Bitfield {
+            kind,
+            dst,
+            src: lhs,
+            src_start,
+            dst_start,
+            len,
+            word: narrow,
+        };
+    }
     if word & 0x1fe0_fc00 == 0x0b00_0000 {
         let rhs = Operand::Register(reg(word >> 16, false));
         return arithmetic(word, dst, lhs, rhs);
@@ -541,10 +597,28 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
             condition: (word & 15) as u8,
         };
     }
-    if word & 0xfe00_0000 == 0xb400_0000 {
-        return Operation::BranchZero {
-            target: relative(pc, word >> 5, 19),
+    if word & 0x7e00_0000 == 0x3400_0000 {
+        let target = relative(pc, word >> 5, 19);
+        let nonzero = word & (1 << 24) != 0;
+        return if word >> 31 == 0 {
+            Operation::BranchZeroWord {
+                target,
+                reg: dst,
+                nonzero,
+            }
+        } else {
+            Operation::BranchZero {
+                target,
+                reg: dst,
+                nonzero,
+            }
+        };
+    }
+    if word & 0x7e00_0000 == 0x3600_0000 {
+        return Operation::BranchBit {
+            target: relative(pc, word >> 5, 14),
             reg: dst,
+            bit: (((word >> 31) << 5) | ((word >> 19) & 31)) as u8,
             nonzero: word & (1 << 24) != 0,
         };
     }

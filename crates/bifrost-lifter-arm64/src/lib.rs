@@ -5,7 +5,8 @@ use bifrost_core::{
     GuestTarget, TargetError,
 };
 use bifrost_decoder_arm64::{
-    DecodeError, DecodedInstruction, Logical, Operand, Operation, Reg, RegisterShift, fetch,
+    Bitfield, DecodeError, DecodedInstruction, Logical, Operand, Operation, Reg, RegisterShift,
+    fetch,
 };
 use bifrost_ir::*;
 use std::fmt;
@@ -153,6 +154,40 @@ impl Arm64Lifter {
                     rhs = ir.with_immediate(IntOp::Xor, rhs, u64::MAX);
                 }
                 ir.logical(kind, dst, lhs, rhs, word);
+                ir.next(next)
+            }
+            Operation::Bitfield {
+                kind,
+                dst,
+                src,
+                src_start,
+                dst_start,
+                len,
+                word,
+            } => {
+                let mask = u64::MAX >> (64 - len);
+                let source = ir.read(src);
+                let field =
+                    ir.shift_register(source, RegisterShift::LogicalRight, src_start, false);
+                let field = ir.with_immediate(IntOp::And, field, mask);
+                let field = ir.shift_register(field, RegisterShift::Left, dst_start, false);
+                let mut result = match kind {
+                    Bitfield::Signed => {
+                        let padding = 64 - dst_start - len;
+                        let value = ir.shift_register(field, RegisterShift::Left, padding, false);
+                        ir.shift_register(value, RegisterShift::ArithmeticRight, padding, false)
+                    }
+                    Bitfield::Merge => {
+                        let original = ir.read(dst);
+                        let kept = ir.with_immediate(IntOp::And, original, !(mask << dst_start));
+                        ir.binary(IntOp::Or, field, kept)
+                    }
+                    Bitfield::Unsigned => field,
+                };
+                if word {
+                    result = ir.with_immediate(IntOp::And, result, u64::from(u32::MAX));
+                }
+                ir.write(dst, result);
                 ir.next(next)
             }
             Operation::Arithmetic {
@@ -355,18 +390,28 @@ impl Arm64Lifter {
                 target,
                 reg,
                 nonzero,
+            }
+            | Operation::BranchZeroWord {
+                target,
+                reg,
+                nonzero,
+            } => {
+                let mut value = ir.read(reg);
+                if matches!(instruction.operation(), Operation::BranchZeroWord { .. }) {
+                    value = ir.with_immediate(IntOp::And, value, u64::from(u32::MAX));
+                }
+                let take = ir.test_zero(value, nonzero);
+                ir.branch(take, target, next)
+            }
+            Operation::BranchBit {
+                target,
+                reg,
+                bit,
+                nonzero,
             } => {
                 let value = ir.read(reg);
-                let zero = ir.integer(0);
-                let take = ir.compare(
-                    if nonzero {
-                        IntPredicate::Ne
-                    } else {
-                        IntPredicate::Eq
-                    },
-                    value,
-                    zero,
-                );
+                let value = ir.with_immediate(IntOp::And, value, 1 << bit);
+                let take = ir.test_zero(value, nonzero);
                 ir.branch(take, target, next)
             }
             Operation::Return(reg) => {
@@ -510,6 +555,19 @@ impl Builder {
             lhs,
             rhs,
         })
+    }
+
+    fn test_zero(&mut self, value: ValueId, nonzero: bool) -> ValueId {
+        let zero = self.integer(0);
+        self.compare(
+            if nonzero {
+                IntPredicate::Ne
+            } else {
+                IntPredicate::Eq
+            },
+            value,
+            zero,
+        )
     }
 
     fn cast(&mut self, value: ValueId, ty: Type) -> ValueId {
