@@ -111,9 +111,15 @@ impl Arm64Lifter {
                 ir.write(dst, value);
                 ir.next(next)
             }
-            Operation::MoveKeep { dst, bits, shift } => {
+            Operation::MoveKeep { dst, bits, shift }
+            | Operation::MoveKeepWord { dst, bits, shift } => {
                 let current = ir.read(dst);
-                let kept = ir.with_immediate(IntOp::And, current, !(0xffff_u64 << shift));
+                let limit = if matches!(instruction.operation(), Operation::MoveKeepWord { .. }) {
+                    u64::from(u32::MAX)
+                } else {
+                    u64::MAX
+                };
+                let kept = ir.with_immediate(IntOp::And, current, !(0xffff_u64 << shift) & limit);
                 let result = ir.with_immediate(IntOp::Or, kept, u64::from(bits) << shift);
                 ir.write(dst, result);
                 ir.next(next)
@@ -226,42 +232,28 @@ impl Arm64Lifter {
                     Operation::WordMemory { .. } => Type::I32,
                     _ => Type::I64,
                 };
-                let layout = MemoryLayout { ty, ..QWORD };
                 let base = ir.read(base);
                 let address = ir.with_immediate(IntOp::Add, base, offset);
-                let address = ir.address(address);
-                let access = if load {
-                    MemoryAccess::Read
-                } else {
-                    MemoryAccess::Write
-                };
-                let guard = ir.value(|out| Op::Guard {
-                    out,
-                    address,
-                    access,
-                    layout,
-                });
-                if load {
-                    let value = ir.value(|out| Op::Load { out, guard, layout });
-                    let value = if ty != Type::I64 {
-                        ir.cast(value, Type::I64)
-                    } else {
-                        value
-                    };
-                    ir.write(reg, value);
-                } else {
-                    let value = ir.read(reg);
-                    let value = if ty != Type::I64 {
-                        ir.cast(value, ty)
-                    } else {
-                        value
-                    };
-                    ir.emit(Op::Store {
-                        guard,
-                        value,
-                        layout,
-                    });
-                }
+                ir.access_scalar(reg, address, ty, load);
+                ir.next(next)
+            }
+            Operation::IndexedMemory {
+                reg,
+                base,
+                offset,
+                load,
+                word,
+                pre_index,
+            } => {
+                let original = ir.read(base);
+                let updated = ir.with_immediate(IntOp::Add, original, offset);
+                ir.access_scalar(
+                    reg,
+                    if pre_index { updated } else { original },
+                    if word { Type::I32 } else { Type::I64 },
+                    load,
+                );
+                ir.write(base, updated);
                 ir.next(next)
             }
             Operation::WordPair {
@@ -575,6 +567,43 @@ impl Builder {
             self.write_flags(flags);
         }
         self.write(dst, result);
+    }
+
+    fn access_scalar(&mut self, reg: Reg, address: ValueId, ty: Type, load: bool) {
+        let layout = MemoryLayout { ty, ..QWORD };
+        let address = self.address(address);
+        let access = if load {
+            MemoryAccess::Read
+        } else {
+            MemoryAccess::Write
+        };
+        let guard = self.value(|out| Op::Guard {
+            out,
+            address,
+            access,
+            layout,
+        });
+        if load {
+            let value = self.value(|out| Op::Load { out, guard, layout });
+            let value = if ty != Type::I64 {
+                self.cast(value, Type::I64)
+            } else {
+                value
+            };
+            self.write(reg, value);
+        } else {
+            let value = self.read(reg);
+            let value = if ty != Type::I64 {
+                self.cast(value, ty)
+            } else {
+                value
+            };
+            self.emit(Op::Store {
+                guard,
+                value,
+                layout,
+            });
+        }
     }
 
     fn shifted_mask(&mut self, value: ValueId, shift: u64, mask: u64) -> ValueId {

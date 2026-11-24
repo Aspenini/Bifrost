@@ -185,6 +185,7 @@ fn word_moves_zero_extend_without_setting_flags() {
         0x2a01_03ff, // mov wzr,w1
         0x52a2_4683, // movz w3,#0x1234,lsl #16
         0x1280_0004, // movn w4,#0
+        0x72b7_dde5, // movk w5,#0xbeef,lsl #16
     ];
     let (mut memory, mut thread) = memory_and_thread(&code, Protection::ReadWrite);
     let CpuState::AArch64(cpu) = &mut thread.cpu else {
@@ -193,6 +194,7 @@ fn word_moves_zero_extend_without_setting_flags() {
     cpu.x[0] = u64::MAX;
     cpu.x[1] = 0x1234_5678_fedc_ba98;
     cpu.x[2] = u64::MAX;
+    cpu.x[5] = 0x1234_abcd_5678_9876;
     cpu.nzcv = 0xa000_0000;
     let original = thread.clone();
     let budget = ExecutionBudget {
@@ -205,13 +207,14 @@ fn word_moves_zero_extend_without_setting_flags() {
     assert_eq!(exit, ExitReason::BudgetExhausted);
     let result = state(&thread);
     assert_eq!(
-        result.x[..5],
+        result.x[..6],
         [
             0xfedc_ba98,
             0x1234_5678_fedc_ba98,
             0,
             0x1234_0000,
-            0xffff_ffff
+            0xffff_ffff,
+            0xbeef_9876
         ]
     );
     assert_eq!(result.nzcv, 0xa000_0000);
@@ -235,21 +238,39 @@ fn word_moves_zero_extend_without_setting_flags() {
 }
 
 #[test]
-fn narrow_memory_access_preserves_adjacent_bytes_and_zero_extends_loads() {
-    check_narrow_memory_access([0x3900_0420, 0x3940_0422], DATA.0, 1, &[0xab]); // strb/ldrb [x1,#1]
-    check_narrow_memory_access([0x381f_f020, 0x385f_f022], DATA.0 + 2, 1, &[0xab]); // sturb/ldurb [x1,#-1]
-    check_narrow_memory_access(
+fn scalar_memory_access_preserves_adjacent_bytes_and_zero_extends_loads() {
+    check_memory_access([0x3900_0420, 0x3940_0422], DATA.0, 1, &[0xab]); // strb/ldrb [x1,#1]
+    check_memory_access([0x381f_f020, 0x385f_f022], DATA.0 + 2, 1, &[0xab]); // sturb/ldurb [x1,#-1]
+    check_memory_access(
         [0xb900_0420, 0xb940_0422],
         DATA.0,
         4,
         &[0xab, 0xef, 0xcd, 0x89],
     ); // str/ldr [x1,#4]
-    check_narrow_memory_access(
+    check_memory_access(
         [0xb81f_f020, 0xb85f_f022],
         DATA.0 + 2,
         1,
         &[0xab, 0xef, 0xcd, 0x89],
     ); // stur/ldur [x1,#-1]
+    check_memory_access(
+        [0xf81f_f020, 0xf85f_f022],
+        DATA.0 + 1,
+        0,
+        &[0xab, 0xef, 0xcd, 0x89, 0x78, 0x56, 0x34, 0x12],
+    ); // stur/ldur X registers [x1,#-1]
+    check_memory_access(
+        [0xb800_4c20, 0xb85f_c422],
+        DATA.0,
+        4,
+        &[0xab, 0xef, 0xcd, 0x89],
+    ); // str [x1,#4]!; ldr [x1],#-4
+    check_memory_access(
+        [0xf800_8c20, 0xf85f_8422],
+        DATA.0 - 7,
+        1,
+        &[0xab, 0xef, 0xcd, 0x89, 0x78, 0x56, 0x34, 0x12],
+    ); // str [x1,#8]!; ldr [x1],#-8
 }
 
 #[test]
@@ -327,7 +348,7 @@ fn scalar_arithmetic_and_logic_use_the_correct_width_and_flags() {
     }
 }
 
-fn check_narrow_memory_access(code: [u32; 2], base: u64, offset: usize, expected_bytes: &[u8]) {
+fn check_memory_access(code: [u32; 2], base: u64, offset: usize, expected_bytes: &[u8]) {
     let (mut memory, mut thread) = memory_and_thread(&code, Protection::ReadWrite);
     let initial = [1, 2, 3, 4, 5, 6, 7, 8, 9];
     let mut expected = initial;
@@ -352,6 +373,7 @@ fn check_narrow_memory_access(code: [u32; 2], base: u64, offset: usize, expected
     memory.read(DATA, &mut bytes).unwrap();
     assert_eq!(bytes, expected);
     assert_eq!(state(&thread).x[2], u64::from_le_bytes(loaded));
+    assert_eq!(state(&thread).x[1], base);
     assert_eq!(state(&thread).x[0], state(&original).x[0]);
 
     #[cfg(all(
@@ -371,6 +393,45 @@ fn check_narrow_memory_access(code: [u32; 2], base: u64, offset: usize, expected
         assert_eq!(jitted, thread);
         memory.read(DATA, &mut bytes).unwrap();
         assert_eq!(bytes, expected);
+    }
+}
+
+#[test]
+fn indexed_memory_faults_leave_the_base_and_destination_intact() {
+    for (word, base) in [
+        (0xf800_8c20, DATA.0 + 4096 - 8),
+        (0xf85f_8422, DATA.0 + 4096),
+    ] {
+        let (mut memory, mut thread) = memory_and_thread(&[word], Protection::ReadWrite);
+        let CpuState::AArch64(cpu) = &mut thread.cpu else {
+            unreachable!()
+        };
+        cpu.x[1] = base;
+        cpu.x[2] = u64::MAX;
+        let original = thread.clone();
+        let exit = RawInterpreter::new(&target(), &mut memory, &mut ())
+            .unwrap()
+            .step(&mut thread)
+            .unwrap();
+        assert!(
+            matches!(exit, ExitReason::Fault(fault) if fault.class == FaultClass::Unmapped && fault.pc == CODE)
+        );
+        assert_eq!(thread.cpu, original.cpu);
+        #[cfg(all(
+            feature = "jit-cranelift",
+            any(target_arch = "x86_64", target_arch = "aarch64"),
+            any(target_os = "linux", target_os = "windows")
+        ))]
+        {
+            use bifrost_runtime::raw::{RawJit, SystemJitMemory};
+            let mut jitted = original;
+            let actual = RawJit::new(&target(), &mut memory, &mut (), SystemJitMemory)
+                .unwrap()
+                .step(&mut jitted)
+                .unwrap();
+            assert_eq!(actual, exit);
+            assert_eq!(jitted, thread);
+        }
     }
 }
 

@@ -50,6 +50,11 @@ pub enum Operation {
         bits: u16,
         shift: u8,
     },
+    MoveKeepWord {
+        dst: Reg,
+        bits: u16,
+        shift: u8,
+    },
     Arithmetic {
         dst: Reg,
         lhs: Reg,
@@ -106,6 +111,14 @@ pub enum Operation {
         base: Reg,
         offset: u64,
         load: bool,
+    },
+    IndexedMemory {
+        reg: Reg,
+        base: Reg,
+        offset: u64,
+        load: bool,
+        word: bool,
+        pre_index: bool,
     },
     WordPair {
         first: Reg,
@@ -329,8 +342,13 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
             src: Operand::Immediate(address),
         };
     }
-    if let kind @ (0x1280_0000 | 0x5280_0000) = word & 0xffc0_0000 {
-        let value = ((word >> 5) & 0xffff) << (((word >> 21) & 1) * 16);
+    if let kind @ (0x1280_0000 | 0x5280_0000 | 0x7280_0000) = word & 0xffc0_0000 {
+        let bits = ((word >> 5) & 0xffff) as u16;
+        let shift = (((word >> 21) & 1) * 16) as u8;
+        if kind == 0x7280_0000 {
+            return Operation::MoveKeepWord { dst, bits, shift };
+        }
+        let value = u32::from(bits) << shift;
         let value = if kind == 0x1280_0000 { !value } else { value };
         return Operation::Move {
             dst,
@@ -429,15 +447,36 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
             word: word >> 31 == 0,
         };
     }
-    if matches!(word & 0xffc0_0000, 0xf900_0000 | 0xf940_0000) && lhs != Reg::Zero {
-        return Operation::Memory {
-            reg: dst,
-            base: lhs,
-            offset: u64::from((word >> 10) & 0xfff) * 8,
-            load: word & (1 << 22) != 0,
-        };
-    }
     if lhs != Reg::Zero {
+        let mode = (word >> 10) & 3;
+        if matches!(mode, 1 | 3) && matches!(word & 0xbfe0_0000, 0xb800_0000 | 0xb840_0000) {
+            if dst == lhs {
+                return Operation::Unsupported;
+            }
+            return Operation::IndexedMemory {
+                reg: dst,
+                base: lhs,
+                offset: sign_extend(word >> 12, 9) as u64,
+                load: word & (1 << 22) != 0,
+                word: word & (1 << 30) == 0,
+                pre_index: mode == 3,
+            };
+        }
+        let offset = if matches!(word & 0xffc0_0000, 0xf900_0000 | 0xf940_0000) {
+            Some(u64::from((word >> 10) & 0xfff) * 8)
+        } else if matches!(word & 0xffe0_0c00, 0xf800_0000 | 0xf840_0000) {
+            Some(sign_extend(word >> 12, 9) as u64)
+        } else {
+            None
+        };
+        if let Some(offset) = offset {
+            return Operation::Memory {
+                reg: dst,
+                base: lhs,
+                offset,
+                load: word & (1 << 22) != 0,
+            };
+        }
         let wide = word >> 31 != 0;
         let offset = if matches!(word & 0x7fc0_0000, 0x3900_0000 | 0x3940_0000) {
             Some(u64::from((word >> 10) & 0xfff) << if wide { 2 } else { 0 })
