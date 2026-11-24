@@ -305,7 +305,7 @@ impl Default for RuntimeProfile {
                 "macho-inspect",
                 true,
                 SupportLevel::Experimental,
-                "thin Mach-O executable metadata inspection",
+                "thin and universal Mach-O metadata inspection",
             )
             .expect("implemented support")
         } else {

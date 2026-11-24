@@ -106,6 +106,12 @@ impl From<ExecutionError> for RunError {
 
 pub fn inspect(bytes: &[u8]) -> Result<Metadata, LoadError> {
     #[cfg(feature = "macho-inspect")]
+    if crate::macho::is_universal(bytes) {
+        return Err(LoadError::Unsupported(
+            "select a Mach-O slice with inspect_universal",
+        ));
+    }
+    #[cfg(feature = "macho-inspect")]
     if bytes.starts_with(crate::macho::MAGIC) {
         return crate::macho::inspect(bytes);
     }

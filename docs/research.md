@@ -1,12 +1,12 @@
 # Phase 8 research
 
-The first experiment inspects thin, little-endian x86-64 and ARM64 Mach-O executables. It validates command bounds, segment tables, applicable protections, and that `LC_MAIN` points into file-backed executable `__TEXT`. It reads metadata without mapping guest pages, loading dependencies, or executing the image.
+The Mach-O inspector accepts thin little-endian x86-64 and ARM64 executables and 32-bit or 64-bit big-endian universal directories containing those slices. It checks directory bounds, alignment, overlap, and consistency with the inner headers. It validates that `LC_MAIN` points into file-backed executable `__TEXT`. A universal ARM64e slice is identified by its subtype. The inspector does not map guest memory or load dependencies.
 
 ```sh
-cargo run --locked -p bifrost-cli -- inspect tests/fixtures/macho/entry-arm64.macho
+cargo run --locked -p bifrost-cli -- inspect tests/fixtures/macho/universal.macho
 ```
 
-The fixture reports entry address `0x100000278`. The inspection profile requires `LC_MAIN`. Fat containers, legacy thread-state entry commands and ARM64e are outside the profile. The [Apple XNU Mach-O header](https://github.com/apple-oss-distributions/xnu/blob/main/EXTERNAL_HEADERS/mach-o/loader.h) defines the format fields this parser reads.
+The fixture reports x86-64 entry `0x100000268` and ARM64 entry `0x100000278`. The inspector requires `LC_MAIN` for entry reporting. Legacy thread-state entry commands, 32-bit executable slices, and ARM64e entry interpretation are outside this profile. The universal fixture combines the self-authored thin fixtures at file offsets `0x4000` and `0x8000` under a big-endian fat32 header. [Apple fat directory format](https://github.com/apple-oss-distributions/xnu/blob/main/EXTERNAL_HEADERS/mach-o/fat.h) · [Apple Mach-O load commands](https://github.com/apple-oss-distributions/xnu/blob/main/EXTERNAL_HEADERS/mach-o/loader.h)
 
 Rebuild the self-authored fixtures with LLVM from the repository root.
 

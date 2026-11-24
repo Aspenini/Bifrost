@@ -36,6 +36,24 @@ fn command(args: Vec<OsString>) -> Result<u32, Error> {
         [command, flag] if command == "capabilities" && flag == "--json" => capabilities_json(),
         [command, path] if command == "inspect" => {
             let image = read_file(Path::new(path))?;
+            if bifrost_runtime::macho::is_universal(&image) {
+                use bifrost_runtime::macho::{SliceArchitecture, inspect_universal};
+                let slices = inspect_universal(&image)?;
+                println!("MachO universal ({} slices)", slices.len());
+                for slice in slices {
+                    match slice.architecture {
+                        SliceArchitecture::Executable(metadata) => println!(
+                            "  {:?} entry {:#x} at file offset {:#x}",
+                            metadata.isa, metadata.entry.0, slice.offset
+                        ),
+                        SliceArchitecture::Arm64e { subtype } => println!(
+                            "  ARM64e subtype {subtype:#x} at file offset {:#x} (identification only)",
+                            slice.offset
+                        ),
+                    }
+                }
+                return Ok(0);
+            }
             let metadata = process::inspect(&image)?;
             println!(
                 "{:?} {:?} entry {:#x}",
@@ -210,7 +228,9 @@ fn run(args: &[OsString], trace: &mut dyn TraceSink) -> Result<u32, Error> {
     let argv: Vec<_> = guest_args.iter().map(|arg| arg.as_bytes()).collect();
     let image = read_file(Path::new(path))?;
     let (mut stdout, mut stderr) = (io::stdout().lock(), io::stderr().lock());
-    let status = if image.starts_with(bifrost_runtime::macho::MAGIC) {
+    let status = if image.starts_with(bifrost_runtime::macho::MAGIC)
+        || bifrost_runtime::macho::is_universal(&image)
+    {
         return Err(
             "Mach-O support is limited to inspection; macOS guest execution is unavailable".into(),
         );

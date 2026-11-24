@@ -15,7 +15,7 @@
 | Linux ELF and syscall provider | Partial, static x86-64 images, initial stack, read-only mounts and core syscalls. Enable `linux-elf`. |
 | Cooperative Linux threads | Rust embedding with host-enrolled x86-64 threads, guarded stacks, and interpreter/JIT parity |
 | Windows PE and API provider | Partial, fixed-base x86-64 console images and named Win32/NT calls. Enable `windows-pe`. |
-| Mach-O inspection | Experimental, thin little-endian x86-64 and ARM64 executables. See the [research scope](research.md). |
+| Mach-O inspection | Experimental, thin and universal x86-64/ARM64 executables, plus ARM64e slice identification. See the [research scope](research.md). |
 | ABI bridge | Partial, four guest ABI descriptors with fixed signatures and synchronous callbacks. Enable `abi-bridge`. |
 | C ABI | Version 1 for raw x86-64 and ARM64 interpretation and optional portable ELF/PE execution. See the [C SDK](sdk.md). |
 | CLI | Host diagnostics, text or JSON capability reporting, image inspection, bounded ELF/PE execution and JSONL tracing |
