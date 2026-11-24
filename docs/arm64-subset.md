@@ -9,6 +9,7 @@ The raw profile uses little-endian A64 instructions and serialized execution ove
 | Memory | 64-bit unsigned scaled immediate LDR/STR with Xn base, including unaligned normal-data accesses |
 | Branch | B, BL, B.cond, 64-bit CBZ/CBNZ, RET Xn |
 | Miscellaneous | NOP, DMB ISH, UDF |
+| Supervisor call | SVC with a 16-bit immediate, reported to the caller as an execution exit |
 
 Register 31 denotes SP where the immediate arithmetic encoding permits it and XZR in the listed zero-register forms. ADDS/SUBS set N, Z, C and V without changing SP. SUBS sets C when there is no unsigned borrow. BL writes the next guest PC to X30, and RET reads its destination register. The next fetch detects a misaligned return destination.
 

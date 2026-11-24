@@ -149,6 +149,11 @@ fn report_lift_failure(
         })
     };
     let failure = match error {
+        #[cfg(feature = "guest-aarch64")]
+        ExecutionError::Arm64Lift(bifrost_lifter_arm64::LiftError::SupervisorCall {
+            pc,
+            immediate,
+        }) => return Ok(ExitReason::Arm64SupervisorCall { pc, immediate }),
         #[cfg(feature = "guest-x86_64")]
         ExecutionError::Lift(bifrost_lifter_x86::LiftError::Decode(error)) => {
             use bifrost_decoder_x86::DecodeError;

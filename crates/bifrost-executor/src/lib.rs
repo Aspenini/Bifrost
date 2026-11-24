@@ -13,6 +13,11 @@ pub enum ExitReason {
     BudgetExhausted,
     Dispatch(GuestAddress),
     Fault(GuestFault),
+    /// Guest state is unchanged. The host handles the call and advances the guest PC.
+    Arm64SupervisorCall {
+        pc: GuestAddress,
+        immediate: u16,
+    },
 }
 
 /// The caller hands over one thread for the duration of a bounded run.

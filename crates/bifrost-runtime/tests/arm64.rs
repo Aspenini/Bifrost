@@ -104,7 +104,7 @@ fn reports_precise_fetch_and_data_faults_and_rejects_unsupported_instructions() 
     );
     assert_eq!(thread.cpu, previous);
 
-    let (mut memory, mut thread) = memory_and_thread(&[0xd400_0001], Protection::ReadWrite);
+    let (mut memory, mut thread) = memory_and_thread(&[0xd400_0002], Protection::ReadWrite);
     let error = RawInterpreter::new(&target(), &mut memory, &mut ())
         .unwrap()
         .step(&mut thread)
@@ -113,7 +113,7 @@ fn reports_precise_fetch_and_data_faults_and_rejects_unsupported_instructions() 
         error,
         ExecutionError::Arm64Lift(bifrost_lifter_arm64::LiftError::UnsupportedInstruction {
             pc: Addr(0x1000),
-            word: 0xd400_0001,
+            word: 0xd400_0002,
             ..
         })
     ));
@@ -129,6 +129,52 @@ fn reports_precise_fetch_and_data_faults_and_rejects_unsupported_instructions() 
     assert_eq!(fault.class, FaultClass::Alignment);
     assert_eq!(fault.pc, Addr(CODE.0 + 1));
     assert_eq!(fault.memory_access, Some((fault.pc, AccessKind::Execute)));
+}
+
+#[test]
+fn supervisor_call_exits_without_changing_guest_state() {
+    const IMMEDIATE: u16 = 0x8123;
+    let call = 0xd400_0001 | (u32::from(IMMEDIATE) << 5);
+    let (mut memory, mut thread) = memory_and_thread(&[call], Protection::ReadWrite);
+    let previous = thread.cpu.clone();
+    let expected = ExitReason::Arm64SupervisorCall {
+        pc: CODE,
+        immediate: IMMEDIATE,
+    };
+    let mut trace = Trace::default();
+    let budget = ExecutionBudget { instructions: 1 };
+    let observed = RawInterpreter::new(&target(), &mut memory, &mut trace)
+        .unwrap()
+        .run(&mut thread, budget)
+        .unwrap();
+    assert_eq!(observed, expected);
+    assert_eq!(thread.cpu, previous);
+    assert!(thread.pending_fault.is_none());
+    assert_eq!(
+        trace.0,
+        [TraceEvent::Step {
+            thread: thread.id,
+            pc: CODE
+        }]
+    );
+
+    #[cfg(all(
+        feature = "jit-cranelift",
+        any(target_arch = "x86_64", target_arch = "aarch64"),
+        any(target_os = "linux", target_os = "windows")
+    ))]
+    {
+        use bifrost_runtime::raw::{RawJit, SystemJitMemory};
+        let mut jit_trace = Trace::default();
+        let observed = RawJit::new(&target(), &mut memory, &mut jit_trace, SystemJitMemory)
+            .unwrap()
+            .run(&mut thread, budget)
+            .unwrap();
+        assert_eq!(observed, expected);
+        assert_eq!(thread.cpu, previous);
+        assert!(thread.pending_fault.is_none());
+        assert_eq!(jit_trace.0, trace.0);
+    }
 }
 
 #[test]
@@ -208,7 +254,7 @@ fn arm64_jit_agrees_on_guest_state_faults_and_trace() {
         }
     }
 
-    let (mut memory, mut thread) = memory_and_thread(&[0xd400_0001], Protection::ReadWrite);
+    let (mut memory, mut thread) = memory_and_thread(&[0xd400_0002], Protection::ReadWrite);
     let before = thread.clone();
     let error = RawJit::new(&target(), &mut memory, &mut (), SystemJitMemory)
         .unwrap()
@@ -218,7 +264,7 @@ fn arm64_jit_agrees_on_guest_state_faults_and_trace() {
         error,
         ExecutionError::Arm64Lift(bifrost_lifter_arm64::LiftError::UnsupportedInstruction {
             pc: CODE,
-            word: 0xd400_0001,
+            word: 0xd400_0002,
             ..
         })
     ));

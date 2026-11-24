@@ -23,6 +23,10 @@ pub struct Arm64Lifter;
 pub enum LiftError {
     Decode(DecodeError),
     Target(TargetError),
+    SupervisorCall {
+        pc: GuestAddress,
+        immediate: u16,
+    },
     UnsupportedInstruction {
         pc: GuestAddress,
         word: u32,
@@ -35,6 +39,9 @@ impl fmt::Display for LiftError {
         match self {
             Self::Decode(error) => error.fmt(f),
             Self::Target(error) => error.fmt(f),
+            Self::SupervisorCall { pc, immediate } => {
+                write!(f, "ARM64 supervisor call #{immediate:#06x} at {:#x}", pc.0)
+            }
             Self::UnsupportedInstruction { pc, word, features } => write!(
                 f,
                 "unsupported ARM64 instruction {word:#010x} at {:#x} ({features:?})",
@@ -187,6 +194,9 @@ impl Arm64Lifter {
             Operation::Return(reg) => {
                 let destination = ir.read(reg);
                 Exit::NextPc(ir.address(destination))
+            }
+            Operation::SupervisorCall { immediate } => {
+                return Err(LiftError::SupervisorCall { pc, immediate });
             }
             Operation::Fence => {
                 ir.emit(Op::Fence);

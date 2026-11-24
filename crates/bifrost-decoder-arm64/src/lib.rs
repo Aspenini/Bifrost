@@ -57,6 +57,9 @@ pub enum Operation {
         nonzero: bool,
     },
     Return(Reg),
+    SupervisorCall {
+        immediate: u16,
+    },
     Fence,
     Undefined,
     Unsupported,
@@ -170,6 +173,11 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
         0xd503_201f => return Operation::Nop,
         0xd503_3bbf => return Operation::Fence, // DMB ISH
         _ => {}
+    }
+    if word & 0xffe0_001f == 0xd400_0001 {
+        return Operation::SupervisorCall {
+            immediate: ((word >> 5) & 0xffff) as u16,
+        };
     }
     if let kind @ (0x9280_0000 | 0xd280_0000 | 0xf280_0000) = word & 0xff80_0000 {
         let bits = ((word >> 5) & 0xffff) as u16;

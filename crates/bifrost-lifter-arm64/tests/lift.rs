@@ -45,18 +45,18 @@ fn emits_verified_ir_with_arm64_pc_at_every_effect() {
 #[test]
 fn unsupported_words_and_wrong_isa_features_are_typed() {
     let pc = Addr(0x1000);
-    let svc = decode(0xd400_0001_u32.to_le_bytes(), pc).unwrap();
+    let hvc = decode(0xd400_0002_u32.to_le_bytes(), pc).unwrap();
     assert!(matches!(
-        Arm64Lifter.lift(svc, &Default::default()),
+        Arm64Lifter.lift(hvc, &Default::default()),
         Err(LiftError::UnsupportedInstruction {
             pc: Addr(0x1000),
-            word: 0xd400_0001,
+            word: 0xd400_0002,
             ..
         })
     ));
     let wrong = [CpuFeature::Sse2].into_iter().collect();
     assert!(matches!(
-        Arm64Lifter.lift(svc, &wrong),
+        Arm64Lifter.lift(hvc, &wrong),
         Err(LiftError::Target(_))
     ));
 }

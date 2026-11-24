@@ -20,7 +20,9 @@ This mode serializes guest execution on one host thread. Guest-created threads, 
 
 The raw SDK runs the documented [x86-64](x86-64-subset.md) and [ARM64](arm64-subset.md) scalar subsets. Enable the required guest feature and either `interp` or `jit-cranelift`. Both `bifrost_runtime::raw::RawInterpreter` and `bifrost_runtime::raw::RawJit` select the frontend from a bare `GuestTarget`. The caller owns guest memory and thread state, supplies the entry PC and optional trace sink, and sets the instruction budget. The `x86` module also supplies convenience constructors for older callers.
 
-A successful step returns the next guest PC. The runtime fetches one instruction from executable guest pages, lifts and verifies it, then interprets the IR or runs the corresponding host code. `run` repeats until a guest fault, a typed error, or exhaustion of the instruction budget. The next fetch after the last instruction in a buffer follows guest memory permissions.
+A successful step returns the next guest PC. The runtime fetches one instruction from executable guest pages, lifts and verifies it, then interprets the IR or runs the corresponding host code. `run` repeats until a guest fault, a supervisor call, a typed error, or exhaustion of the instruction budget. The next fetch after the last instruction in a buffer follows guest memory permissions.
+
+An AArch64 `SVC` returns `ExitReason::Arm64SupervisorCall` with the instruction address and 16-bit immediate on both backends. The runtime records the instruction in the trace and preserves the register state and pending fault. The caller applies its own ABI and advances the guest PC to resume.
 
 The standalone `bifrost-interpreter` executes verified IR directly. Each step covers the consecutive operations at one PC within a block, with the terminator included if it has that PC. Block parameters transfer as raw typed bits and budget exits preserve the frame. An instruction frontend puts faulting checks and accesses before architectural writes to give precise restart state.
 
