@@ -30,6 +30,6 @@
 
 The native baseline results above are from commit `618b05e`. [Workspace CI](https://github.com/Aspenini/Bifrost/actions/runs/45068515511) · [SDK fixture tests](https://github.com/Aspenini/Bifrost/actions/runs/45068515506)
 
-The process model has one guest thread per run. Linux exposes synthetic process and thread IDs. Guest thread creation, scheduling, signals and Windows exception delivery are outside this profile. macOS currently uses the interpreter. The C interface uses the interpreter on all hosts.
+Rust embedders can enroll additional threads before starting a Linux guest. They run cooperatively with synthetic process and thread IDs and one shared instruction budget. Guest-created threads, signals, and Windows exception delivery are outside this profile. The CLI and C API use one guest thread. macOS and the C interface use the interpreter. [Thread lifecycle](execution-model.md)
 
 Run `cargo run --locked -p bifrost-cli --features "bifrost-runtime/guest-x86_64,bifrost-runtime/guest-aarch64,bifrost-runtime/interp,bifrost-runtime/jit-cranelift" -- capabilities` to check both guest profiles and backends. A reserved feature reports its compiled crate boundary as implemented=false, available=false, and validated=false.

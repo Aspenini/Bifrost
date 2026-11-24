@@ -2,6 +2,30 @@ use bifrost_core::{AccessKind, GuestAddress as Addr};
 use bifrost_memory::{AddressSpace, GuestMemory, GuestMemoryRead, MemoryError, Protection};
 
 #[test]
+fn guarded_stack_mapping_is_atomic() {
+    let mut memory = AddressSpace::new(4096, 3).unwrap();
+    memory
+        .map(Addr(0x2000), 4096, Protection::ReadWrite)
+        .unwrap();
+    assert_eq!(
+        memory.map_guarded_stack(Addr(0x1000), 4096),
+        Err(MemoryError::AlreadyMapped(Addr(0x2000)))
+    );
+    assert_eq!(memory.generation_at(Addr(0x1000)), None);
+
+    let top = memory.map_guarded_stack(Addr(0x3000), 4096).unwrap();
+    assert_eq!(top, Addr(0x5000));
+    assert!(matches!(
+        memory.write(Addr(0x3fff), &[0]),
+        Err(MemoryError::Denied {
+            protection: Protection::Guard,
+            ..
+        })
+    ));
+    memory.write(Addr(0x4fff), &[12]).unwrap();
+}
+
+#[test]
 fn validates_the_entire_access_before_copying() {
     let mut memory = AddressSpace::new(4096, 3).unwrap();
     memory

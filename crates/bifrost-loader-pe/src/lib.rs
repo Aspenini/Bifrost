@@ -251,16 +251,7 @@ impl Pe<'_> {
             memory.write(import.slot, &target.0.to_le_bytes())?;
             memory.protect(page, PAGE, import.protection)?;
         }
-        memory.map(
-            GuestAddress(STACK_TOP - STACK_SIZE - PAGE),
-            PAGE,
-            Protection::Guard,
-        )?;
-        memory.map(
-            GuestAddress(STACK_TOP - STACK_SIZE),
-            STACK_SIZE,
-            Protection::ReadWrite,
-        )?;
+        memory.map_guarded_stack(GuestAddress(STACK_TOP - STACK_SIZE - PAGE), STACK_SIZE)?;
         let sp = STACK_TOP - 40;
         memory.write(GuestAddress(sp), &return_address.0.to_le_bytes())?;
         let mut state = X86State {

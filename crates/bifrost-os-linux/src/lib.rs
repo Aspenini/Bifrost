@@ -1,5 +1,7 @@
 //! Bounded Linux x86-64 syscall provider with explicit standard streams.
-use bifrost_core::{GuestAddress, GuestIsa, GuestMemory, X86State, validate_guest_access};
+use bifrost_core::{
+    GuestAddress, GuestIsa, GuestMemory, GuestThreadId, X86State, validate_guest_access,
+};
 pub use bifrost_vfs::Vfs;
 use std::{collections::BTreeMap, fmt, io::Write, num::NonZeroU8, sync::Arc};
 
@@ -39,6 +41,14 @@ pub enum SyscallExit {
     Continue,
     Exit(u8),
 }
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ThreadSyscall {
+    Continue,
+    Yield,
+    ExitThread(u8),
+    ExitGroup(u8),
+}
 struct File {
     data: Arc<[u8]>,
     offset: usize,
@@ -69,13 +79,31 @@ impl<'a> Linux<'a> {
         cpu: &mut X86State,
         memory: &mut dyn GuestMemory,
     ) -> Result<SyscallExit, UnsupportedSyscall> {
+        Ok(match self.thread_syscall(cpu, GuestThreadId(1), memory)? {
+            ThreadSyscall::Continue | ThreadSyscall::Yield => SyscallExit::Continue,
+            ThreadSyscall::ExitThread(status) | ThreadSyscall::ExitGroup(status) => {
+                SyscallExit::Exit(status)
+            }
+        })
+    }
+
+    /// Handles a syscall for a thread in a cooperatively scheduled guest process.
+    pub fn thread_syscall(
+        &mut self,
+        cpu: &mut X86State,
+        thread: GuestThreadId,
+        memory: &mut dyn GuestMemory,
+    ) -> Result<ThreadSyscall, UnsupportedSyscall> {
         let [number, arg0, arg1, arg2] = [cpu.gpr[0], cpu.gpr[7], cpu.gpr[6], cpu.gpr[2]];
         let result = match number {
             0 => self.read(arg0, GuestAddress(arg1), arg2, memory),
             1 => self.write(arg0, GuestAddress(arg1), arg2, memory),
             3 => self.close(arg0),
-            39 | 186 => 1, // Synthetic process and initial thread ID.
-            60 | 231 => return Ok(SyscallExit::Exit(arg0 as u8)),
+            24 => 0, // sched_yield
+            39 => 1, // Synthetic process ID.
+            60 => return Ok(ThreadSyscall::ExitThread(arg0 as u8)),
+            186 => thread.0 as i64,
+            231 => return Ok(ThreadSyscall::ExitGroup(arg0 as u8)),
             257 => self.openat(arg0, GuestAddress(arg1), arg2, memory),
             _ => {
                 return Err(UnsupportedSyscall {
@@ -89,7 +117,11 @@ impl<'a> Linux<'a> {
         cpu.gpr[1] = next; // RCX
         cpu.gpr[11] = cpu.rflags;
         cpu.rip = GuestAddress(next);
-        Ok(SyscallExit::Continue)
+        if number == 24 {
+            Ok(ThreadSyscall::Yield)
+        } else {
+            Ok(ThreadSyscall::Continue)
+        }
     }
 
     fn write(

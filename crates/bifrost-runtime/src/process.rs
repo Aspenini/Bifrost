@@ -3,21 +3,31 @@ use crate::{
     RuntimeProfile,
     raw::{ExecutionError, ExitReason, RawInterpreter},
 };
+#[cfg(feature = "linux-elf")]
+use bifrost_core::GuestMemoryRead;
 use bifrost_core::{
-    AbiId, CpuState, ExecMode, GuestFault, GuestIsa, GuestMemory, GuestOs, GuestTarget,
-    GuestThread, GuestThreadId, TraceEvent, TraceSink, X86State,
+    AbiId, CpuState, ExecMode, GuestAddress, GuestFault, GuestIsa, GuestMemory, GuestOs,
+    GuestTarget, GuestThread, GuestThreadId, TraceEvent, TraceSink, X86State,
 };
 use bifrost_loader::LoadError;
 pub use bifrost_loader::{Format, Metadata};
 #[cfg(feature = "linux-elf")]
 pub use bifrost_os_linux::{Io, Vfs};
 #[cfg(feature = "linux-elf")]
-use bifrost_os_linux::{Linux, SyscallExit, UnsupportedSyscall};
+use bifrost_os_linux::{Linux, ThreadSyscall, UnsupportedSyscall};
 #[cfg(feature = "windows-pe")]
 use bifrost_os_windows::{ApiAction, RETURN_PC, STUB_BASE, Windows};
 #[cfg(feature = "windows-pe")]
 pub use bifrost_os_windows::{ApiPolicy, Io as WindowsIo};
-use std::fmt;
+use std::{collections::VecDeque, fmt};
+
+const QUANTUM: u64 = 64;
+#[cfg(feature = "linux-elf")]
+const MAX_THREADS: usize = 64;
+#[cfg(feature = "linux-elf")]
+const THREAD_STACK_BYTES: u64 = 64 * 1024;
+#[cfg(feature = "linux-elf")]
+const THREAD_STACK_TOP: u64 = 0x7fff_ff00_0000;
 
 #[derive(Clone, Copy, Debug)]
 pub struct RunOptions {
@@ -51,6 +61,9 @@ pub enum RunError {
     Fault(GuestFault),
     Budget,
     AlreadyRun,
+    ThreadLimit,
+    ThreadEntry(GuestAddress),
+    ThreadStack(bifrost_core::MemoryError),
     Backend,
 }
 impl fmt::Display for RunError {
@@ -72,6 +85,9 @@ impl fmt::Display for RunError {
             ),
             Self::Budget => f.write_str("guest instruction budget exhausted"),
             Self::AlreadyRun => f.write_str("prepared guest process already ran"),
+            Self::ThreadLimit => f.write_str("guest thread limit reached"),
+            Self::ThreadEntry(pc) => write!(f, "guest thread entry {:#x} is not executable", pc.0),
+            Self::ThreadStack(error) => write!(f, "could not map guest thread stack: {error}"),
             Self::Backend => f.write_str("invalid process execution backend"),
         }
     }
@@ -240,11 +256,36 @@ impl RuntimeProfile {
 pub struct PreparedProcess<'a> {
     metadata: Metadata,
     memory: bifrost_memory::AddressSpace,
-    thread: GuestThread,
+    threads: Vec<ThreadSlot>,
     services: Services<'a>,
     mode: ExecMode,
     limit: u64,
     started: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ThreadStatus {
+    Runnable,
+    Exited(u32),
+    Stopped,
+}
+
+struct ThreadSlot {
+    thread: GuestThread,
+    status: ThreadStatus,
+}
+
+impl ThreadSlot {
+    fn new(id: GuestThreadId, state: X86State) -> Self {
+        Self {
+            thread: GuestThread {
+                id,
+                cpu: CpuState::X86_64(Box::new(state)),
+                pending_fault: None,
+            },
+            status: ThreadStatus::Runnable,
+        }
+    }
 }
 
 impl<'a> PreparedProcess<'a> {
@@ -263,11 +304,7 @@ impl<'a> PreparedProcess<'a> {
             mode,
             limit,
             started: false,
-            thread: GuestThread {
-                id: GuestThreadId(1),
-                cpu: CpuState::X86_64(Box::new(state)),
-                pending_fault: None,
-            },
+            threads: vec![ThreadSlot::new(GuestThreadId(1), state)],
         }
     }
 
@@ -279,8 +316,53 @@ impl<'a> PreparedProcess<'a> {
         self.mode
     }
 
-    pub const fn thread(&self) -> &GuestThread {
-        &self.thread
+    /// Initial guest thread, available before and after execution.
+    pub fn thread(&self) -> &GuestThread {
+        &self.threads[0].thread
+    }
+
+    pub fn threads(&self) -> impl ExactSizeIterator<Item = (&GuestThread, ThreadStatus)> {
+        self.threads.iter().map(|slot| (&slot.thread, slot.status))
+    }
+
+    /// Registers an additional Linux guest thread before execution.
+    /// The entry is a bare x86-64 entry point, with the argument in RDI and an empty stack.
+    #[cfg(feature = "linux-elf")]
+    pub fn add_linux_thread(
+        &mut self,
+        entry: GuestAddress,
+        argument: u64,
+    ) -> Result<GuestThreadId, RunError> {
+        if self.started {
+            return Err(RunError::AlreadyRun);
+        }
+        if !matches!(self.services, Services::Linux(_)) {
+            return Err(RunError::Load(LoadError::Unsupported(
+                "Linux thread enrollment on a non-Linux image",
+            )));
+        }
+        let index = self.threads.len();
+        if index >= MAX_THREADS {
+            return Err(RunError::ThreadLimit);
+        }
+        if !entry.is_canonical_48() || self.memory.fetch(entry, &mut [0]).is_err() {
+            return Err(RunError::ThreadEntry(entry));
+        }
+        let slot_size = THREAD_STACK_BYTES + bifrost_loader::PAGE;
+        let guard = GuestAddress(THREAD_STACK_TOP - index as u64 * slot_size);
+        let stack = self
+            .memory
+            .map_guarded_stack(guard, THREAD_STACK_BYTES)
+            .map_err(RunError::ThreadStack)?;
+        let id = GuestThreadId(index as u64 + 1);
+        let mut state = X86State {
+            rip: entry,
+            ..X86State::default()
+        };
+        state.gpr[4] = stack.0;
+        state.gpr[7] = argument;
+        self.threads.push(ThreadSlot::new(id, state));
+        Ok(id)
     }
 
     pub fn run(&mut self, trace: &mut dyn TraceSink) -> Result<u32, RunError> {
@@ -289,13 +371,19 @@ impl<'a> PreparedProcess<'a> {
         }
         let Self {
             memory,
-            thread,
+            threads,
             services,
             mode,
             limit,
             ..
         } = self;
-        execute(memory, thread, services, *mode, *limit, trace)
+        let result = execute(memory, threads, services, *mode, *limit, trace);
+        for slot in threads {
+            if slot.status == ThreadStatus::Runnable {
+                slot.status = ThreadStatus::Stopped;
+            }
+        }
+        result
     }
 }
 
@@ -323,9 +411,14 @@ impl Services<'_> {
                     return Ok(Action::Step);
                 }
                 Ok(
-                    match linux.syscall(cpu, memory).map_err(RunError::Syscall)? {
-                        SyscallExit::Continue => Action::Continue,
-                        SyscallExit::Exit(status) => Action::Exit(status.into()),
+                    match linux
+                        .thread_syscall(cpu, thread.id, memory)
+                        .map_err(RunError::Syscall)?
+                    {
+                        ThreadSyscall::Continue => Action::Continue,
+                        ThreadSyscall::Yield => Action::Yield,
+                        ThreadSyscall::ExitThread(status) => Action::ExitThread(status.into()),
+                        ThreadSyscall::ExitGroup(status) => Action::ExitGroup(status.into()),
                     },
                 )
             }
@@ -337,7 +430,7 @@ impl Services<'_> {
                 {
                     ApiAction::Step => Action::Step,
                     ApiAction::Returned => Action::Continue,
-                    ApiAction::Exit(status) => Action::Exit(status),
+                    ApiAction::Exit(status) => Action::ExitGroup(status),
                 },
             ),
         }
@@ -347,7 +440,11 @@ impl Services<'_> {
 enum Action {
     Step,
     Continue,
-    Exit(u32),
+    #[cfg(feature = "linux-elf")]
+    Yield,
+    #[cfg(feature = "linux-elf")]
+    ExitThread(u32),
+    ExitGroup(u32),
 }
 
 fn bare_target() -> GuestTarget {
@@ -362,10 +459,10 @@ fn bare_target() -> GuestTarget {
 
 fn execute(
     memory: &mut bifrost_memory::AddressSpace,
-    thread: &mut GuestThread,
+    threads: &mut [ThreadSlot],
     services: &mut Services<'_>,
     mode: ExecMode,
-    limit: u64,
+    mut remaining: u64,
     trace: &mut dyn TraceSink,
 ) -> Result<u32, RunError> {
     let target = bare_target();
@@ -384,27 +481,56 @@ fn execute(
         )?)),
         _ => return Err(RunError::Backend),
     };
-    for _ in 0..limit {
-        let pc = thread.cpu.pc();
-        let action = services.dispatch(thread, engine.memory());
-        if !matches!(&action, Ok(Action::Step)) {
-            engine.trace().record(TraceEvent::Step {
-                thread: thread.id,
-                pc,
-            });
+    let mut ready = (0..threads.len()).collect::<VecDeque<_>>();
+    while let Some(index) = ready.pop_front() {
+        let slot = &mut threads[index];
+        for _ in 0..QUANTUM {
+            remaining = remaining.checked_sub(1).ok_or(RunError::Budget)?;
+            match step_thread(&mut slot.thread, services, &mut engine)? {
+                Action::Continue => {}
+                #[cfg(feature = "linux-elf")]
+                Action::Yield => break,
+                #[cfg(feature = "linux-elf")]
+                Action::ExitThread(status) => {
+                    slot.status = ThreadStatus::Exited(status);
+                    break;
+                }
+                Action::ExitGroup(status) => {
+                    slot.status = ThreadStatus::Exited(status);
+                    return Ok(status);
+                }
+                Action::Step => return Err(RunError::Backend),
+            }
         }
-        match action? {
-            Action::Exit(status) => return Ok(status),
-            Action::Continue => continue,
-            Action::Step => {}
-        }
-        match engine.step(thread)? {
-            ExitReason::Dispatch(_) => {}
-            ExitReason::Fault(fault) => return Err(RunError::Fault(fault)),
-            _ => return Err(RunError::Backend),
+        if slot.status == ThreadStatus::Runnable {
+            ready.push_back(index);
         }
     }
-    Err(RunError::Budget)
+    match threads[0].status {
+        ThreadStatus::Exited(status) => Ok(status),
+        _ => Err(RunError::Backend),
+    }
+}
+
+fn step_thread(
+    thread: &mut GuestThread,
+    services: &mut Services<'_>,
+    engine: &mut Engine<'_>,
+) -> Result<Action, RunError> {
+    let pc = thread.cpu.pc();
+    let action = services.dispatch(thread, engine.memory());
+    if !matches!(&action, Ok(Action::Step)) {
+        engine.trace().record(TraceEvent::Step {
+            thread: thread.id,
+            pc,
+        });
+        return action;
+    }
+    match engine.step(thread)? {
+        ExitReason::Dispatch(_) => Ok(Action::Continue),
+        ExitReason::Fault(fault) => Err(RunError::Fault(fault)),
+        _ => Err(RunError::Backend),
+    }
 }
 
 enum Engine<'a> {

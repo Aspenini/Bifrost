@@ -4,7 +4,15 @@
 
 Rust embedders can reuse a `RuntimeProfile` to call `prepare_linux` or `prepare_windows` explicitly. Preparation selects the backend, validates image metadata, resolves PE imports, and maps a private guest address space. It returns a `PreparedProcess` before the first guest instruction. Loaded bytes are copied into guest memory, so the caller may release the source image after preparation.
 
-Call `PreparedProcess::run` with a trace sink. The session retains its selected backend and thread snapshot after exit, fault, or budget exhaustion. A prepared session runs once, with a single initial thread and an instruction budget. The `run_linux` and `run_windows` convenience functions use the same session API.
+Call `PreparedProcess::run` with a trace sink. The session retains its selected backend and thread snapshots after exit, fault, or budget exhaustion. A prepared session runs once. The `run_linux` and `run_windows` convenience functions use the same session API.
+
+### Cooperative Linux threads
+
+Before running a Linux process, a Rust embedder can call `add_linux_thread(entry, argument)` to attach a thread in the same guest address space. The entry must be executable and receive its one integer argument in RDI. It starts with its own empty guarded stack and must terminate through a syscall. The process supports up to 64 threads including the initial thread. The CLI and C API use the initial thread only.
+
+The runtime visits runnable threads in registration order, giving each up to 64 guest instructions or service boundaries per turn. Linux `sched_yield` ends the turn early. All threads share one instruction budget, address space, JIT cache, and Linux provider. `gettid` returns the active thread's synthetic ID. `exit` retires the current thread. When every thread retires, the session returns the initial thread's status. `exit_group` returns its own status and stops the other threads. A fault or budget exhaustion stops the entire session. The `threads()` method exposes the resulting statuses and CPU states.
+
+This mode serializes guest execution on one host thread. Guest-created threads, futexes, TLS setup, and signal delivery remain future extensions. The Windows guest provider continues to run one guest thread.
 
 `CpuState::encode_snapshot` and `CpuState::decode_snapshot` preserve modeled x86-64 and ARM64 registers, including vector register bits. Version 1 starts with `BFRS`, a version byte, an ISA byte (1 for x86-64 or 2 for ARM64), and two reserved zero bytes. The payload contains the fields of the corresponding CPU state in declaration order, with no padding and all numeric fields in little-endian order. The decoder requires the exact payload size. These snapshots cover CPU registers. Memory, provider state, and scheduling are separate.
 

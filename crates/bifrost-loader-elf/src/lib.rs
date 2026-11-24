@@ -115,8 +115,7 @@ impl Elf<'_> {
         }
         let mut memory = self.image.map()?;
         let base = STACK - STACK_SIZE;
-        memory.map(GuestAddress(base - PAGE), PAGE, Protection::Guard)?;
-        memory.map(GuestAddress(base), STACK_SIZE, Protection::ReadWrite)?;
+        memory.map_guarded_stack(GuestAddress(base - PAGE), STACK_SIZE)?;
         let mut top = STACK;
         let mut words = vec![args.len() as u64];
         for group in [args, environment] {

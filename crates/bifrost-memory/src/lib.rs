@@ -97,6 +97,44 @@ impl AddressSpace {
         len: u64,
         protection: Protection,
     ) -> Result<(), MemoryError> {
+        self.map_pages(start, len, |_| protection)
+    }
+
+    /// Maps a lower guard page and a read-write stack in one transaction.
+    pub fn map_guarded_stack(
+        &mut self,
+        guard: GuestAddress,
+        stack_bytes: u64,
+    ) -> Result<GuestAddress, MemoryError> {
+        let page = self.page_size as u64;
+        if stack_bytes == 0 {
+            return Err(MemoryError::InvalidRegion {
+                start: guard,
+                len: stack_bytes,
+            });
+        }
+        let len = stack_bytes
+            .checked_add(page)
+            .ok_or(MemoryError::AddressOverflow(guard))?;
+        let top = guard
+            .checked_add(len)
+            .ok_or(MemoryError::AddressOverflow(guard))?;
+        self.map_pages(guard, len, |base| {
+            if base == guard.0 {
+                Protection::Guard
+            } else {
+                Protection::ReadWrite
+            }
+        })?;
+        Ok(top)
+    }
+
+    fn map_pages(
+        &mut self,
+        start: GuestAddress,
+        len: u64,
+        protection: impl Fn(u64) -> Protection,
+    ) -> Result<(), MemoryError> {
         let bases = self.region(start, len)?;
         let count =
             usize::try_from(len / self.page_size as u64).map_err(|_| MemoryError::PageLimit)?;
@@ -123,7 +161,7 @@ impl AddressSpace {
                 base,
                 Page {
                     bytes,
-                    protection,
+                    protection: protection(base),
                     generation,
                 },
             ));
