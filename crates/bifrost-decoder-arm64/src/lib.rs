@@ -18,6 +18,14 @@ pub enum Operand {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Logical {
+    And,
+    Orr,
+    Eor,
+    Ands,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum Operation {
     Nop,
@@ -40,6 +48,20 @@ pub enum Operation {
         rhs: Operand,
         sub: bool,
         flags: bool,
+    },
+    ArithmeticWord {
+        dst: Reg,
+        lhs: Reg,
+        rhs: Operand,
+        sub: bool,
+        flags: bool,
+    },
+    LogicalImmediate {
+        kind: Logical,
+        dst: Reg,
+        src: Reg,
+        mask: u64,
+        word: bool,
     },
     Memory {
         reg: Reg,
@@ -177,9 +199,56 @@ fn relative(pc: GuestAddress, bits: u32, width: u32) -> GuestAddress {
     GuestAddress(pc.0.wrapping_add_signed(sign_extend(bits, width) * 4))
 }
 
-fn operation(word: u32, pc: GuestAddress) -> Operation {
+fn arithmetic(word: u32, dst: Reg, lhs: Reg, rhs: Operand) -> Operation {
     let sub = word & (1 << 30) != 0;
     let flags = word & (1 << 29) != 0;
+    if word >> 31 == 0 {
+        Operation::ArithmeticWord {
+            dst,
+            lhs,
+            rhs,
+            sub,
+            flags,
+        }
+    } else {
+        Operation::Arithmetic {
+            dst,
+            lhs,
+            rhs,
+            sub,
+            flags,
+        }
+    }
+}
+
+fn logical_immediate_mask(instruction: u32, bits: u32) -> Option<u64> {
+    let n = (instruction >> 22) & 1;
+    let immr = (instruction >> 16) & 0x3f;
+    let imms = (instruction >> 10) & 0x3f;
+    // The first set bit of N:~imms determines the width of a repeated element.
+    let len = ((n << 6) | (!imms & 0x3f)).checked_ilog2()?;
+    let width = 1 << len;
+    if width < 2 || width > bits {
+        return None;
+    }
+    let ones = (imms & (width - 1)) + 1;
+    if ones == width {
+        return None;
+    }
+    let rotation = immr & (width - 1);
+    let mut element = (1_u64 << ones) - 1;
+    if rotation != 0 {
+        element = (element >> rotation) | (element << (width - rotation));
+        element &= u64::MAX >> (64 - width);
+    }
+    let mut mask = 0;
+    for offset in (0..bits).step_by(width as usize) {
+        mask |= element << offset;
+    }
+    Some(mask)
+}
+
+fn operation(word: u32, pc: GuestAddress) -> Operation {
     let dst = reg(word, false);
     let lhs = reg(word >> 5, false);
     match word {
@@ -244,26 +313,38 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
         }
         _ => {}
     }
-    if word & 0x9f80_0000 == 0x9100_0000 {
+    if word & 0x1f80_0000 == 0x1100_0000 {
         let shift = if word & (1 << 22) == 0 { 0 } else { 12 };
         let rhs = Operand::Immediate(u64::from((word >> 10) & 0xfff) << shift);
-        return Operation::Arithmetic {
-            dst: reg(word, !flags),
-            lhs: reg(word >> 5, true),
+        return arithmetic(
+            word,
+            reg(word, word & (1 << 29) == 0),
+            reg(word >> 5, true),
             rhs,
-            sub,
-            flags,
+        );
+    }
+    if word & 0x1f80_0000 == 0x1200_0000 {
+        let narrow = word >> 31 == 0;
+        let kind = match (word >> 29) & 3 {
+            0 => Logical::And,
+            1 => Logical::Orr,
+            2 => Logical::Eor,
+            _ => Logical::Ands,
+        };
+        let Some(mask) = logical_immediate_mask(word, if narrow { 32 } else { 64 }) else {
+            return Operation::Undefined;
+        };
+        return Operation::LogicalImmediate {
+            kind,
+            dst: reg(word, kind != Logical::Ands),
+            src: lhs,
+            mask,
+            word: narrow,
         };
     }
-    if word & 0x9fe0_fc00 == 0x8b00_0000 {
+    if word & 0x1fe0_fc00 == 0x0b00_0000 {
         let rhs = Operand::Register(reg(word >> 16, false));
-        return Operation::Arithmetic {
-            dst,
-            lhs,
-            rhs,
-            sub,
-            flags,
-        };
+        return arithmetic(word, dst, lhs, rhs);
     }
     if matches!(word & 0xffc0_0000, 0xf900_0000 | 0xf940_0000) && lhs != Reg::Zero {
         return Operation::Memory {

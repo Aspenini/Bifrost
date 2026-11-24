@@ -4,7 +4,9 @@ use bifrost_core::{
     AbiId, CpuFeatureSet, FaultClass, GuestAddress, GuestIsa, GuestMemoryRead, GuestOs,
     GuestTarget, TargetError,
 };
-use bifrost_decoder_arm64::{DecodeError, DecodedInstruction, Operand, Operation, Reg, fetch};
+use bifrost_decoder_arm64::{
+    DecodeError, DecodedInstruction, Logical, Operand, Operation, Reg, fetch,
+};
 use bifrost_ir::*;
 use std::fmt;
 
@@ -115,18 +117,57 @@ impl Arm64Lifter {
                 ir.write(dst, result);
                 ir.next(next)
             }
+            Operation::LogicalImmediate {
+                kind,
+                dst,
+                src,
+                mask,
+                word,
+            } => {
+                let op = match kind {
+                    Logical::And | Logical::Ands => IntOp::And,
+                    Logical::Orr => IntOp::Or,
+                    Logical::Eor => IntOp::Xor,
+                };
+                let source = ir.read(src);
+                let mut result = ir.with_immediate(op, source, mask);
+                if word {
+                    result = ir.with_immediate(IntOp::And, result, u64::from(u32::MAX));
+                }
+                if kind == Logical::Ands {
+                    let flags = ir.nz_flags(result, if word { 0 } else { 32 });
+                    ir.write_flags(flags);
+                }
+                ir.write(dst, result);
+                ir.next(next)
+            }
             Operation::Arithmetic {
                 dst,
                 lhs,
                 rhs,
                 sub,
                 flags,
+            }
+            | Operation::ArithmeticWord {
+                dst,
+                lhs,
+                rhs,
+                sub,
+                flags,
             } => {
-                let lhs = ir.read(lhs);
-                let rhs = ir.operand(rhs);
-                let result = ir.binary(if sub { IntOp::Sub } else { IntOp::Add }, lhs, rhs);
+                let word = matches!(instruction.operation(), Operation::ArithmeticWord { .. });
+                let mut lhs = ir.read(lhs);
+                let mut rhs = ir.operand(rhs);
+                if word {
+                    lhs = ir.with_immediate(IntOp::And, lhs, u64::from(u32::MAX));
+                    rhs = ir.with_immediate(IntOp::And, rhs, u64::from(u32::MAX));
+                }
+                let mut result = ir.binary(if sub { IntOp::Sub } else { IntOp::Add }, lhs, rhs);
+                if word {
+                    result = ir.with_immediate(IntOp::And, result, u64::from(u32::MAX));
+                }
                 if flags {
-                    ir.flags(lhs, rhs, result, sub);
+                    ir.flags(lhs, rhs, result, sub, if word { 0 } else { 32 });
                 }
                 ir.write(dst, result);
                 ir.next(next)
@@ -376,11 +417,17 @@ impl Builder {
         })
     }
 
-    fn flags(&mut self, lhs: ValueId, rhs: ValueId, result: ValueId, sub: bool) {
+    fn nz_flags(&mut self, result: ValueId, sign_shift: u64) -> ValueId {
         let zero = self.integer(0);
-        let n = self.shifted_mask(result, 32, 1 << 31);
+        let n = self.shifted_mask(result, sign_shift, 1 << 31);
         let is_zero = self.compare(IntPredicate::Eq, result, zero);
         let z = self.mask_if(is_zero, 1 << 30, zero);
+        self.binary(IntOp::Or, n, z)
+    }
+
+    fn flags(&mut self, lhs: ValueId, rhs: ValueId, result: ValueId, sub: bool, sign_shift: u64) {
+        let nz = self.nz_flags(result, sign_shift);
+        let zero = self.integer(0);
         let carry = if sub {
             self.compare(IntPredicate::UnsignedLe, rhs, lhs)
         } else {
@@ -390,10 +437,13 @@ impl Builder {
         let sign_change = self.binary(IntOp::Xor, lhs, result);
         let affected = self.binary(IntOp::Xor, if sub { lhs } else { result }, rhs);
         let overflow = self.binary(IntOp::And, sign_change, affected);
-        let v = self.shifted_mask(overflow, 35, 1 << 28);
-        let nz = self.binary(IntOp::Or, n, z);
+        let v = self.shifted_mask(overflow, sign_shift + 3, 1 << 28);
         let cv = self.binary(IntOp::Or, c, v);
         let flags = self.binary(IntOp::Or, nz, cv);
+        self.write_flags(flags);
+    }
+
+    fn write_flags(&mut self, flags: ValueId) {
         let value = self.cast(flags, Type::I32);
         self.emit(Op::WriteRegister {
             register: NZCV,

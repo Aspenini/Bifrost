@@ -94,3 +94,10 @@ fn forms_pc_relative_addresses_for_adr_and_adrp() {
         );
     }
 }
+
+#[test]
+fn rejects_reserved_logical_immediate_masks() {
+    assert_eq!(op(0x3240_0000), Operation::Undefined); // 32-bit form with N=1
+    assert_eq!(op(0xb240_fc00), Operation::Undefined); // all-one element
+    assert_eq!(op(0xb200_fc00), Operation::Undefined); // no element size
+}

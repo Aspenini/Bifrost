@@ -240,6 +240,69 @@ fn byte_memory_access_preserves_adjacent_bytes_and_zero_extends_loads() {
     check_byte_memory_access([0x381f_f020, 0x385f_f022], DATA.0 + 2); // sturb/ldurb [x1,#-1]
 }
 
+#[test]
+fn word_arithmetic_and_logical_immediates_use_the_correct_width_and_flags() {
+    const NZCV: u32 = 0xa000_0000;
+    // The inputs carry nonzero high halves to catch accidental 64-bit arithmetic.
+    for (word, lhs, rhs, expected, flags) in [
+        (0x0b02_0020, 0xffff_ffff, 1, 0, NZCV),        // add w0,w1,w2
+        (0x4b02_0020, 0, 1, 0xffff_ffff, NZCV),        // sub w0,w1,w2
+        (0x2b02_0020, 0xffff_ffff, 1, 0, 0x6000_0000), // adds, zero and carry
+        (0x2b02_0020, 0x7fff_ffff, 1, 0x8000_0000, 0x9000_0000), // adds, overflow
+        (0x6b02_0020, 0, 1, 0xffff_ffff, 0x8000_0000), // subs, borrow
+        (0x6b02_0020, 0x8000_0000, 1, 0x7fff_ffff, 0x3000_0000), // subs, overflow and no borrow
+        (0x1140_0420, 0xab, 0, 0x10ab, NZCV),          // add w0,w1,#1,lsl #12
+        (0x7100_043f, 1, 0, u64::MAX, 0x6000_0000),    // cmp w1,#1
+        (0x1100_043f, 0xffff_ffff, 0, u64::MAX, NZCV), // add wsp,w1,#1
+        (0x3200_f3e0, 0, 0, 0x5555_5555, NZCV),        // orr w0,wzr,#0x55555555
+        (0x1208_9c20, 0x1234_56ab, 0, 0x1200_5600, NZCV), // and w0,w1,#0xff00ff00
+        (0xd241_0420, 1, 0, 0x2bcd_1234_0000_0000, NZCV), // eor x0,x1,#0x8000000000000001
+        (0x7201_0020, 0x8000_0000, 0, 0x8000_0000, 0x8000_0000), // ands w0,w1,#0x80000000, negative
+        (0x7201_0020, 0x7fff_ffff, 0, 0, 0x4000_0000), // ands w0,w1,#0x80000000, zero
+        (0xf241_043f, 0, 0, u64::MAX, 0x8000_0000),    // tst x1,#0x8000000000000001
+        (0x3200_e03f, 2, 0, u64::MAX, NZCV),           // orr wsp,w1,#0x11111111
+    ] {
+        let (mut memory, mut thread) = memory_and_thread(&[word], Protection::ReadWrite);
+        let CpuState::AArch64(cpu) = &mut thread.cpu else {
+            unreachable!()
+        };
+        cpu.x[0] = u64::MAX;
+        cpu.x[1] = 0xabcd_1234_0000_0000 | lhs;
+        cpu.x[2] = 0x1234_abcd_0000_0000 | rhs;
+        cpu.nzcv = NZCV;
+        let original = thread.clone();
+        let exit = RawInterpreter::new(&target(), &mut memory, &mut ())
+            .unwrap()
+            .step(&mut thread)
+            .unwrap();
+        assert_eq!(exit, ExitReason::Dispatch(Addr(CODE.0 + 4)));
+        assert_eq!(state(&thread).x[0], expected, "instruction {word:#x}");
+        assert_eq!(state(&thread).nzcv, flags, "instruction {word:#x}");
+        let sp = match word {
+            0x1100_043f => Addr(0),
+            0x3200_e03f => Addr(0x1111_1113),
+            _ => state(&original).sp,
+        };
+        assert_eq!(state(&thread).sp, sp);
+
+        #[cfg(all(
+            feature = "jit-cranelift",
+            any(target_arch = "x86_64", target_arch = "aarch64"),
+            any(target_os = "linux", target_os = "windows")
+        ))]
+        {
+            use bifrost_runtime::raw::{RawJit, SystemJitMemory};
+            let mut jitted = original;
+            let actual = RawJit::new(&target(), &mut memory, &mut (), SystemJitMemory)
+                .unwrap()
+                .step(&mut jitted)
+                .unwrap();
+            assert_eq!(actual, exit);
+            assert_eq!(jitted, thread);
+        }
+    }
+}
+
 fn check_byte_memory_access(code: [u32; 2], base: u64) {
     let (mut memory, mut thread) = memory_and_thread(&code, Protection::ReadWrite);
     memory.write(DATA, &[1, 2, 3]).unwrap();
