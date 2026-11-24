@@ -235,13 +235,25 @@ fn word_moves_zero_extend_without_setting_flags() {
 }
 
 #[test]
-fn byte_memory_access_preserves_adjacent_bytes_and_zero_extends_loads() {
-    check_byte_memory_access([0x3900_0420, 0x3940_0422], DATA.0); // strb/ldrb [x1,#1]
-    check_byte_memory_access([0x381f_f020, 0x385f_f022], DATA.0 + 2); // sturb/ldurb [x1,#-1]
+fn narrow_memory_access_preserves_adjacent_bytes_and_zero_extends_loads() {
+    check_narrow_memory_access([0x3900_0420, 0x3940_0422], DATA.0, 1, &[0xab]); // strb/ldrb [x1,#1]
+    check_narrow_memory_access([0x381f_f020, 0x385f_f022], DATA.0 + 2, 1, &[0xab]); // sturb/ldurb [x1,#-1]
+    check_narrow_memory_access(
+        [0xb900_0420, 0xb940_0422],
+        DATA.0,
+        4,
+        &[0xab, 0xef, 0xcd, 0x89],
+    ); // str/ldr [x1,#4]
+    check_narrow_memory_access(
+        [0xb81f_f020, 0xb85f_f022],
+        DATA.0 + 2,
+        1,
+        &[0xab, 0xef, 0xcd, 0x89],
+    ); // stur/ldur [x1,#-1]
 }
 
 #[test]
-fn word_arithmetic_and_logical_immediates_use_the_correct_width_and_flags() {
+fn scalar_arithmetic_and_logical_immediates_use_the_correct_width_and_flags() {
     const NZCV: u32 = 0xa000_0000;
     // The inputs carry nonzero high halves to catch accidental 64-bit arithmetic.
     for (word, lhs, rhs, expected, flags) in [
@@ -261,6 +273,12 @@ fn word_arithmetic_and_logical_immediates_use_the_correct_width_and_flags() {
         (0x7201_0020, 0x7fff_ffff, 0, 0, 0x4000_0000), // ands w0,w1,#0x80000000, zero
         (0xf241_043f, 0, 0, u64::MAX, 0x8000_0000),    // tst x1,#0x8000000000000001
         (0x3200_e03f, 2, 0, u64::MAX, NZCV),           // orr wsp,w1,#0x11111111
+        (0x1b02_7c20, 0xffff_ffff, 2, 0xffff_fffe, NZCV), // mul w0,w1,w2
+        (0x1b02_0c20, 2, 3, 13, NZCV),                 // madd w0,w1,w2,w3
+        (0x1b02_8c20, 2, 4, 0xffff_ffff, NZCV),        // msub w0,w1,w2,w3
+        (0x1b02_fc20, 2, 3, 0xffff_fffa, NZCV),        // mneg w0,w1,w2
+        (0x9b02_0c20, 2, 3, 0x27d0_8e36_0000_000d, NZCV), // madd x0,x1,x2,x3
+        (0x9b02_8c20, 2, 3, 0xd82f_71ca_0000_0001, NZCV), // msub x0,x1,x2,x3
     ] {
         let (mut memory, mut thread) = memory_and_thread(&[word], Protection::ReadWrite);
         let CpuState::AArch64(cpu) = &mut thread.cpu else {
@@ -269,6 +287,7 @@ fn word_arithmetic_and_logical_immediates_use_the_correct_width_and_flags() {
         cpu.x[0] = u64::MAX;
         cpu.x[1] = 0xabcd_1234_0000_0000 | lhs;
         cpu.x[2] = 0x1234_abcd_0000_0000 | rhs;
+        cpu.x[3] = 7;
         cpu.nzcv = NZCV;
         let original = thread.clone();
         let exit = RawInterpreter::new(&target(), &mut memory, &mut ())
@@ -303,13 +322,18 @@ fn word_arithmetic_and_logical_immediates_use_the_correct_width_and_flags() {
     }
 }
 
-fn check_byte_memory_access(code: [u32; 2], base: u64) {
+fn check_narrow_memory_access(code: [u32; 2], base: u64, offset: usize, expected_bytes: &[u8]) {
     let (mut memory, mut thread) = memory_and_thread(&code, Protection::ReadWrite);
-    memory.write(DATA, &[1, 2, 3]).unwrap();
+    let initial = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+    let mut expected = initial;
+    expected[offset..offset + expected_bytes.len()].copy_from_slice(expected_bytes);
+    let mut loaded = [0; 8];
+    loaded[..expected_bytes.len()].copy_from_slice(expected_bytes);
+    memory.write(DATA, &initial).unwrap();
     let CpuState::AArch64(cpu) = &mut thread.cpu else {
         unreachable!()
     };
-    cpu.x[0] = 0x1234_56ab;
+    cpu.x[0] = 0x1234_5678_89cd_efab;
     cpu.x[1] = base;
     cpu.x[2] = u64::MAX;
     let original = thread.clone();
@@ -319,10 +343,10 @@ fn check_byte_memory_access(code: [u32; 2], base: u64) {
         .run(&mut thread, budget)
         .unwrap();
     assert_eq!(exit, ExitReason::BudgetExhausted);
-    let mut bytes = [0; 3];
+    let mut bytes = [0; 9];
     memory.read(DATA, &mut bytes).unwrap();
-    assert_eq!(bytes, [1, 0xab, 3]);
-    assert_eq!(state(&thread).x[2], 0xab);
+    assert_eq!(bytes, expected);
+    assert_eq!(state(&thread).x[2], u64::from_le_bytes(loaded));
     assert_eq!(state(&thread).x[0], state(&original).x[0]);
 
     #[cfg(all(
@@ -332,7 +356,7 @@ fn check_byte_memory_access(code: [u32; 2], base: u64) {
     ))]
     {
         use bifrost_runtime::raw::{RawJit, SystemJitMemory};
-        memory.write(DATA, &[1, 2, 3]).unwrap();
+        memory.write(DATA, &initial).unwrap();
         let mut jitted = original;
         let actual = RawJit::new(&target(), &mut memory, &mut (), SystemJitMemory)
             .unwrap()
@@ -341,7 +365,7 @@ fn check_byte_memory_access(code: [u32; 2], base: u64) {
         assert_eq!(actual, exit);
         assert_eq!(jitted, thread);
         memory.read(DATA, &mut bytes).unwrap();
-        assert_eq!(bytes, [1, 0xab, 3]);
+        assert_eq!(bytes, expected);
     }
 }
 
@@ -360,6 +384,69 @@ fn validates_arm64_feature_requirements_at_construction() {
             RawInterpreter::new(&target, &mut memory, &mut ()),
             Err(ExecutionError::UnsupportedTarget(_))
         ));
+    }
+}
+
+#[test]
+fn word_pairs_read_and_write_contiguous_words_and_guard_the_whole_span() {
+    let code = [0x293f_8820, 0x297f_9023]; // stp w0,w2,[x1,#-4]; ldp w3,w4,[x1,#-4]
+    for faulting in [false, true] {
+        let (mut memory, mut thread) = memory_and_thread(&code, Protection::ReadWrite);
+        let address = if faulting { Addr(DATA.0 + 4092) } else { DATA };
+        let before = [0x77; 4];
+        memory.write(address, &before).unwrap();
+        let CpuState::AArch64(cpu) = &mut thread.cpu else {
+            unreachable!()
+        };
+        cpu.x[0] = 0xdead_beef_1122_3344;
+        cpu.x[1] = address.0 + 4;
+        cpu.x[2] = 0xdead_beef_aabb_ccdd;
+        cpu.x[3] = u64::MAX;
+        cpu.x[4] = u64::MAX;
+        let original = thread.clone();
+        let budget = ExecutionBudget { instructions: 2 };
+        let exit = RawInterpreter::new(&target(), &mut memory, &mut ())
+            .unwrap()
+            .run(&mut thread, budget)
+            .unwrap();
+        let mut first = [0; 4];
+        memory.read(address, &mut first).unwrap();
+        if faulting {
+            let ExitReason::Fault(fault) = exit else {
+                panic!("pair must fault at the page boundary")
+            };
+            assert_eq!(fault.pc, CODE);
+            assert_eq!(fault.class, FaultClass::Unmapped);
+            assert_eq!(first, before);
+            assert_eq!(thread.cpu, original.cpu);
+        } else {
+            assert_eq!(exit, ExitReason::BudgetExhausted);
+            assert_eq!(state(&thread).x[3..5], [0x1122_3344, 0xaabb_ccdd]);
+            assert_eq!(state(&thread).x[1], address.0 + 4);
+            let mut pair = [0; 8];
+            memory.read(address, &mut pair).unwrap();
+            assert_eq!(pair, [0x44, 0x33, 0x22, 0x11, 0xdd, 0xcc, 0xbb, 0xaa]);
+        }
+
+        #[cfg(all(
+            feature = "jit-cranelift",
+            any(target_arch = "x86_64", target_arch = "aarch64"),
+            any(target_os = "linux", target_os = "windows")
+        ))]
+        {
+            use bifrost_runtime::raw::{RawJit, SystemJitMemory};
+            memory.write(address, &before).unwrap();
+            let mut jitted = original;
+            let actual = RawJit::new(&target(), &mut memory, &mut (), SystemJitMemory)
+                .unwrap()
+                .run(&mut jitted, budget)
+                .unwrap();
+            assert_eq!(actual, exit);
+            assert_eq!(jitted, thread);
+            let mut jitted_first = [0; 4];
+            memory.read(address, &mut jitted_first).unwrap();
+            assert_eq!(jitted_first, first);
+        }
     }
 }
 

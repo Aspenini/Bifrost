@@ -172,6 +172,29 @@ impl Arm64Lifter {
                 ir.write(dst, result);
                 ir.next(next)
             }
+            Operation::MultiplyAccumulate {
+                dst,
+                lhs,
+                rhs,
+                accumulator,
+                sub,
+                word,
+            } => {
+                let lhs = ir.read(lhs);
+                let rhs = ir.read(rhs);
+                let accumulator = ir.read(accumulator);
+                let product = ir.binary(IntOp::Mul, lhs, rhs);
+                let mut result = ir.binary(
+                    if sub { IntOp::Sub } else { IntOp::Add },
+                    accumulator,
+                    product,
+                );
+                if word {
+                    result = ir.with_immediate(IntOp::And, result, u64::from(u32::MAX));
+                }
+                ir.write(dst, result);
+                ir.next(next)
+            }
             Operation::Memory {
                 reg,
                 base,
@@ -183,12 +206,19 @@ impl Arm64Lifter {
                 base,
                 offset,
                 load,
+            }
+            | Operation::WordMemory {
+                reg,
+                base,
+                offset,
+                load,
             } => {
-                let byte = matches!(instruction.operation(), Operation::ByteMemory { .. });
-                let layout = MemoryLayout {
-                    ty: if byte { Type::I8 } else { Type::I64 },
-                    ..QWORD
+                let ty = match instruction.operation() {
+                    Operation::ByteMemory { .. } => Type::I8,
+                    Operation::WordMemory { .. } => Type::I32,
+                    _ => Type::I64,
                 };
+                let layout = MemoryLayout { ty, ..QWORD };
                 let base = ir.read(base);
                 let address = ir.with_immediate(IntOp::Add, base, offset);
                 let address = ir.address(address);
@@ -205,7 +235,7 @@ impl Arm64Lifter {
                 });
                 if load {
                     let value = ir.value(|out| Op::Load { out, guard, layout });
-                    let value = if byte {
+                    let value = if ty != Type::I64 {
                         ir.cast(value, Type::I64)
                     } else {
                         value
@@ -213,8 +243,8 @@ impl Arm64Lifter {
                     ir.write(reg, value);
                 } else {
                     let value = ir.read(reg);
-                    let value = if byte {
-                        ir.cast(value, Type::I8)
+                    let value = if ty != Type::I64 {
+                        ir.cast(value, ty)
                     } else {
                         value
                     };
@@ -222,6 +252,59 @@ impl Arm64Lifter {
                         guard,
                         value,
                         layout,
+                    });
+                }
+                ir.next(next)
+            }
+            Operation::WordPair {
+                first,
+                second,
+                base,
+                offset,
+                load,
+            } => {
+                let base = ir.read(base);
+                let address = ir.with_immediate(IntOp::Add, base, offset);
+                let address = ir.address(address);
+                let access = if load {
+                    MemoryAccess::Read
+                } else {
+                    MemoryAccess::Write
+                };
+                // Guard the entire pair before changing memory or registers.
+                let guard = ir.value(|out| Op::Guard {
+                    out,
+                    address,
+                    access,
+                    layout: QWORD,
+                });
+                if load {
+                    let pair = ir.value(|out| Op::Load {
+                        out,
+                        guard,
+                        layout: QWORD,
+                    });
+                    let low = ir.with_immediate(IntOp::And, pair, u64::from(u32::MAX));
+                    let high = ir.shifted_mask(pair, 32, u64::from(u32::MAX));
+                    ir.write(first, low);
+                    ir.write(second, high);
+                } else {
+                    let low = ir.read(first);
+                    let low = ir.with_immediate(IntOp::And, low, u64::from(u32::MAX));
+                    let high = ir.read(second);
+                    let count = ir.integer(32);
+                    let high = ir.value(|out| Op::Shift {
+                        out,
+                        op: ShiftOp::Left,
+                        value: high,
+                        count,
+                        rule: ShiftCount::Mask6,
+                    });
+                    let value = ir.binary(IntOp::Or, low, high);
+                    ir.emit(Op::Store {
+                        guard,
+                        value,
+                        layout: QWORD,
                     });
                 }
                 ir.next(next)
