@@ -281,6 +281,14 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
             load: word & (1 << 22) != 0,
         };
     }
+    if matches!(word & 0xffe0_0c00, 0x3800_0000 | 0x3840_0000) && lhs != Reg::Zero {
+        return Operation::ByteMemory {
+            reg: dst,
+            base: lhs,
+            offset: sign_extend(word >> 12, 9) as u64,
+            load: word & (1 << 22) != 0,
+        };
+    }
     if word & 0x7c00_0000 == 0x1400_0000 {
         return Operation::Branch {
             target: relative(pc, word, 26),

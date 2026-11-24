@@ -236,13 +236,18 @@ fn word_moves_zero_extend_without_setting_flags() {
 
 #[test]
 fn byte_memory_access_preserves_adjacent_bytes_and_zero_extends_loads() {
-    let code = [0x3900_0420, 0x3940_0422]; // strb w0,[x1,#1]; ldrb w2,[x1,#1]
+    check_byte_memory_access([0x3900_0420, 0x3940_0422], DATA.0); // strb/ldrb [x1,#1]
+    check_byte_memory_access([0x381f_f020, 0x385f_f022], DATA.0 + 2); // sturb/ldurb [x1,#-1]
+}
+
+fn check_byte_memory_access(code: [u32; 2], base: u64) {
     let (mut memory, mut thread) = memory_and_thread(&code, Protection::ReadWrite);
     memory.write(DATA, &[1, 2, 3]).unwrap();
     let CpuState::AArch64(cpu) = &mut thread.cpu else {
         unreachable!()
     };
     cpu.x[0] = 0x1234_56ab;
+    cpu.x[1] = base;
     cpu.x[2] = u64::MAX;
     let original = thread.clone();
     let budget = ExecutionBudget { instructions: 2 };
