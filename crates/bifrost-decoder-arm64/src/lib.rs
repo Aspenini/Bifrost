@@ -41,6 +41,13 @@ pub enum Bitfield {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AddressExtend {
+    UnsignedWord,
+    SignedWord,
+    Doubleword,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum Operation {
     Nop,
@@ -135,6 +142,15 @@ pub enum Operation {
         load: bool,
         word: bool,
         pre_index: bool,
+    },
+    RegisterOffsetMemory {
+        reg: Reg,
+        base: Reg,
+        index: Reg,
+        extend: AddressExtend,
+        scale: bool,
+        size_log2: u8,
+        load: bool,
     },
     WordPair {
         first: Reg,
@@ -504,6 +520,23 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
         };
     }
     if lhs != Reg::Zero {
+        if word & 0x3fa0_0c00 == 0x3820_0800 {
+            let extend = match (word >> 13) & 7 {
+                2 => AddressExtend::UnsignedWord,
+                6 => AddressExtend::SignedWord,
+                3 | 7 => AddressExtend::Doubleword,
+                _ => return Operation::Undefined,
+            };
+            return Operation::RegisterOffsetMemory {
+                reg: dst,
+                base: lhs,
+                index: reg(word >> 16, false),
+                extend,
+                scale: word & (1 << 12) != 0,
+                size_log2: (word >> 30) as u8,
+                load: word & (1 << 22) != 0,
+            };
+        }
         let mode = (word >> 10) & 3;
         if matches!(mode, 1 | 3) && matches!(word & 0xbfe0_0000, 0xb800_0000 | 0xb840_0000) {
             if dst == lhs {

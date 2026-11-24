@@ -356,6 +356,24 @@ fn scalar_arithmetic_and_logic_use_the_correct_width_and_flags() {
     }
 }
 
+#[test]
+fn register_offsets_extend_and_scale_before_the_memory_access() {
+    check_memory_access(
+        [0xb823_5820, 0xb863_5822],
+        DATA.0,
+        4,
+        &[0xab, 0xef, 0xcd, 0x89],
+    );
+    check_memory_access([0x3824_c820, 0x3864_c822], DATA.0 + 2, 1, &[0xab]);
+    check_memory_access(
+        [0xf825_6820, 0xf865_6822],
+        DATA.0,
+        1,
+        &[0xab, 0xef, 0xcd, 0x89, 0x78, 0x56, 0x34, 0x12],
+    );
+    check_memory_access([0x7825_7820, 0x7865_7822], DATA.0, 2, &[0xab, 0xef]);
+}
+
 fn check_memory_access(code: [u32; 2], base: u64, offset: usize, expected_bytes: &[u8]) {
     let (mut memory, mut thread) = memory_and_thread(&code, Protection::ReadWrite);
     let initial = [1, 2, 3, 4, 5, 6, 7, 8, 9];
@@ -370,6 +388,9 @@ fn check_memory_access(code: [u32; 2], base: u64, offset: usize, expected_bytes:
     cpu.x[0] = 0x1234_5678_89cd_efab;
     cpu.x[1] = base;
     cpu.x[2] = u64::MAX;
+    cpu.x[3] = 0xfedc_ba98_0000_0001;
+    cpu.x[4] = 0x1234_abcd_ffff_ffff;
+    cpu.x[5] = 1;
     let original = thread.clone();
     let budget = ExecutionBudget { instructions: 2 };
     let exit = RawInterpreter::new(&target(), &mut memory, &mut ())

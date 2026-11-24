@@ -5,8 +5,8 @@ use bifrost_core::{
     GuestTarget, TargetError,
 };
 use bifrost_decoder_arm64::{
-    Bitfield, DecodeError, DecodedInstruction, Logical, Operand, Operation, Reg, RegisterShift,
-    fetch,
+    AddressExtend, Bitfield, DecodeError, DecodedInstruction, Logical, Operand, Operation, Reg,
+    RegisterShift, fetch,
 };
 use bifrost_ir::*;
 use std::fmt;
@@ -289,6 +289,38 @@ impl Arm64Lifter {
                     load,
                 );
                 ir.write(base, updated);
+                ir.next(next)
+            }
+            Operation::RegisterOffsetMemory {
+                reg,
+                base,
+                index,
+                extend,
+                scale,
+                size_log2,
+                load,
+            } => {
+                let base = ir.read(base);
+                let index = ir.read(index);
+                let index = match extend {
+                    AddressExtend::UnsignedWord => {
+                        ir.with_immediate(IntOp::And, index, u64::from(u32::MAX))
+                    }
+                    AddressExtend::SignedWord => {
+                        let low = ir.shift_register(index, RegisterShift::Left, 32, false);
+                        ir.shift_register(low, RegisterShift::ArithmeticRight, 32, false)
+                    }
+                    AddressExtend::Doubleword => index,
+                };
+                let offset = ir.shift_register(
+                    index,
+                    RegisterShift::Left,
+                    if scale { size_log2 } else { 0 },
+                    false,
+                );
+                let address = ir.binary(IntOp::Add, base, offset);
+                let ty = [Type::I8, Type::I16, Type::I32, Type::I64][usize::from(size_log2)];
+                ir.access_scalar(reg, address, ty, load);
                 ir.next(next)
             }
             Operation::WordPair {
