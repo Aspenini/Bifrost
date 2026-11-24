@@ -178,6 +178,106 @@ fn supervisor_call_exits_without_changing_guest_state() {
 }
 
 #[test]
+fn word_moves_zero_extend_without_setting_flags() {
+    let code = [
+        0x2a01_03e0, // mov w0,w1
+        0x2a1f_03e2, // mov w2,wzr
+        0x2a01_03ff, // mov wzr,w1
+        0x52a2_4683, // movz w3,#0x1234,lsl #16
+        0x1280_0004, // movn w4,#0
+    ];
+    let (mut memory, mut thread) = memory_and_thread(&code, Protection::ReadWrite);
+    let CpuState::AArch64(cpu) = &mut thread.cpu else {
+        unreachable!()
+    };
+    cpu.x[0] = u64::MAX;
+    cpu.x[1] = 0x1234_5678_fedc_ba98;
+    cpu.x[2] = u64::MAX;
+    cpu.nzcv = 0xa000_0000;
+    let original = thread.clone();
+    let budget = ExecutionBudget {
+        instructions: code.len() as u64,
+    };
+    let exit = RawInterpreter::new(&target(), &mut memory, &mut ())
+        .unwrap()
+        .run(&mut thread, budget)
+        .unwrap();
+    assert_eq!(exit, ExitReason::BudgetExhausted);
+    let result = state(&thread);
+    assert_eq!(
+        result.x[..5],
+        [
+            0xfedc_ba98,
+            0x1234_5678_fedc_ba98,
+            0,
+            0x1234_0000,
+            0xffff_ffff
+        ]
+    );
+    assert_eq!(result.nzcv, 0xa000_0000);
+    assert_eq!(result.sp, state(&original).sp);
+
+    #[cfg(all(
+        feature = "jit-cranelift",
+        any(target_arch = "x86_64", target_arch = "aarch64"),
+        any(target_os = "linux", target_os = "windows")
+    ))]
+    {
+        use bifrost_runtime::raw::{RawJit, SystemJitMemory};
+        let mut jitted = original;
+        let actual = RawJit::new(&target(), &mut memory, &mut (), SystemJitMemory)
+            .unwrap()
+            .run(&mut jitted, budget)
+            .unwrap();
+        assert_eq!(actual, exit);
+        assert_eq!(jitted, thread);
+    }
+}
+
+#[test]
+fn byte_memory_access_preserves_adjacent_bytes_and_zero_extends_loads() {
+    let code = [0x3900_0420, 0x3940_0422]; // strb w0,[x1,#1]; ldrb w2,[x1,#1]
+    let (mut memory, mut thread) = memory_and_thread(&code, Protection::ReadWrite);
+    memory.write(DATA, &[1, 2, 3]).unwrap();
+    let CpuState::AArch64(cpu) = &mut thread.cpu else {
+        unreachable!()
+    };
+    cpu.x[0] = 0x1234_56ab;
+    cpu.x[2] = u64::MAX;
+    let original = thread.clone();
+    let budget = ExecutionBudget { instructions: 2 };
+    let exit = RawInterpreter::new(&target(), &mut memory, &mut ())
+        .unwrap()
+        .run(&mut thread, budget)
+        .unwrap();
+    assert_eq!(exit, ExitReason::BudgetExhausted);
+    let mut bytes = [0; 3];
+    memory.read(DATA, &mut bytes).unwrap();
+    assert_eq!(bytes, [1, 0xab, 3]);
+    assert_eq!(state(&thread).x[2], 0xab);
+    assert_eq!(state(&thread).x[0], state(&original).x[0]);
+
+    #[cfg(all(
+        feature = "jit-cranelift",
+        any(target_arch = "x86_64", target_arch = "aarch64"),
+        any(target_os = "linux", target_os = "windows")
+    ))]
+    {
+        use bifrost_runtime::raw::{RawJit, SystemJitMemory};
+        memory.write(DATA, &[1, 2, 3]).unwrap();
+        let mut jitted = original;
+        let actual = RawJit::new(&target(), &mut memory, &mut (), SystemJitMemory)
+            .unwrap()
+            .run(&mut jitted, budget)
+            .unwrap();
+        assert_eq!(actual, exit);
+        assert_eq!(jitted, thread);
+        memory.read(DATA, &mut bytes).unwrap();
+        assert_eq!(bytes, [1, 0xab, 3]);
+    }
+}
+
+#[test]
 fn validates_arm64_feature_requirements_at_construction() {
     let (mut memory, _) = memory_and_thread(&[0xd503_201f], Protection::ReadWrite);
     for feature in [CpuFeature::Neon, CpuFeature::Lse] {

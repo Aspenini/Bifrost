@@ -75,3 +75,22 @@ fn decodes_the_full_supervisor_call_immediate() {
         Operation::SupervisorCall { immediate: 0xffff }
     );
 }
+
+#[test]
+fn forms_pc_relative_addresses_for_adr_and_adrp() {
+    for (word, expected) in [
+        (0x1000_0040u32, 0x245c),
+        (0x10ff_ffe0, 0x2450),
+        (0xb000_0000, 0x3000),
+        (0xf0ff_ffe0, 0x1000),
+    ] {
+        let decoded = decode(word.to_le_bytes(), Addr(0x2454)).unwrap();
+        assert_eq!(
+            decoded.operation(),
+            Operation::Move {
+                dst: Reg::X(0),
+                src: Operand::Immediate(expected),
+            }
+        );
+    }
+}

@@ -25,6 +25,10 @@ pub enum Operation {
         dst: Reg,
         src: Operand,
     },
+    MoveWord {
+        dst: Reg,
+        src: Reg,
+    },
     MoveKeep {
         dst: Reg,
         bits: u16,
@@ -38,6 +42,12 @@ pub enum Operation {
         flags: bool,
     },
     Memory {
+        reg: Reg,
+        base: Reg,
+        offset: u64,
+        load: bool,
+    },
+    ByteMemory {
         reg: Reg,
         base: Reg,
         offset: u64,
@@ -158,10 +168,13 @@ fn reg(bits: u32, sp: bool) -> Reg {
     }
 }
 
-fn relative(pc: GuestAddress, bits: u32, width: u32) -> GuestAddress {
+fn sign_extend(bits: u32, width: u32) -> i64 {
     let shift = 32 - width;
-    let signed = ((bits << shift) as i32) >> shift;
-    GuestAddress(pc.0.wrapping_add_signed(i64::from(signed) * 4))
+    i64::from(((bits << shift) as i32) >> shift)
+}
+
+fn relative(pc: GuestAddress, bits: u32, width: u32) -> GuestAddress {
+    GuestAddress(pc.0.wrapping_add_signed(sign_extend(bits, width) * 4))
 }
 
 fn operation(word: u32, pc: GuestAddress) -> Operation {
@@ -177,6 +190,27 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
     if word & 0xffe0_001f == 0xd400_0001 {
         return Operation::SupervisorCall {
             immediate: ((word >> 5) & 0xffff) as u16,
+        };
+    }
+    if word & 0x1f00_0000 == 0x1000_0000 {
+        let imm = ((word >> 5) & 0x7ffff) << 2 | ((word >> 29) & 3);
+        let displacement = sign_extend(imm, 21);
+        let address = if word >> 31 == 0 {
+            pc.0.wrapping_add_signed(displacement)
+        } else {
+            (pc.0 & !0xfff).wrapping_add_signed(displacement << 12)
+        };
+        return Operation::Move {
+            dst,
+            src: Operand::Immediate(address),
+        };
+    }
+    if let kind @ (0x1280_0000 | 0x5280_0000) = word & 0xffc0_0000 {
+        let value = ((word >> 5) & 0xffff) << (((word >> 21) & 1) * 16);
+        let value = if kind == 0x1280_0000 { !value } else { value };
+        return Operation::Move {
+            dst,
+            src: Operand::Immediate(u64::from(value)),
         };
     }
     if let kind @ (0x9280_0000 | 0xd280_0000 | 0xf280_0000) = word & 0xff80_0000 {
@@ -195,11 +229,20 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
             _ => Operation::MoveKeep { dst, bits, shift },
         };
     }
-    if word & 0xffe0_ffe0 == 0xaa00_03e0 {
-        return Operation::Move {
-            dst,
-            src: Operand::Register(reg(word >> 16, false)),
-        };
+    match word & 0xffe0_ffe0 {
+        0x2a00_03e0 => {
+            return Operation::MoveWord {
+                dst,
+                src: reg(word >> 16, false),
+            };
+        }
+        0xaa00_03e0 => {
+            return Operation::Move {
+                dst,
+                src: Operand::Register(reg(word >> 16, false)),
+            };
+        }
+        _ => {}
     }
     if word & 0x9f80_0000 == 0x9100_0000 {
         let shift = if word & (1 << 22) == 0 { 0 } else { 12 };
@@ -227,6 +270,14 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
             reg: dst,
             base: lhs,
             offset: u64::from((word >> 10) & 0xfff) * 8,
+            load: word & (1 << 22) != 0,
+        };
+    }
+    if matches!(word & 0xffc0_0000, 0x3900_0000 | 0x3940_0000) && lhs != Reg::Zero {
+        return Operation::ByteMemory {
+            reg: dst,
+            base: lhs,
+            offset: u64::from((word >> 10) & 0xfff),
             load: word & (1 << 22) != 0,
         };
     }

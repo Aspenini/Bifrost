@@ -4,9 +4,10 @@ The raw profile uses little-endian A64 instructions and serialized execution ove
 
 | Family | Accepted forms |
 | --- | --- |
-| MOV | MOVZ, MOVN and MOVK to X registers, and MOV from a register via the unshifted ORR alias |
+| MOV | MOVZ and MOVN to W or X registers, MOVK to X registers, and MOV from a W or X register via the unshifted ORR alias |
 | Arithmetic | 64-bit ADD, ADDS, SUB, SUBS with imm12 (optional LSL #12) or register LSL #0, including CMP/CMN and immediate moves to/from SP |
-| Memory | 64-bit unsigned scaled immediate LDR/STR with Xn base, including unaligned normal-data accesses |
+| Address generation | ADR and ADRP |
+| Memory | 64-bit unsigned scaled immediate LDR/STR and unsigned immediate LDRB/STRB with Xn base, including unaligned normal-data accesses |
 | Branch | B, BL, B.cond, 64-bit CBZ/CBNZ, RET Xn |
 | Miscellaneous | NOP, DMB ISH, UDF |
 | Supervisor call | SVC with a 16-bit immediate, reported to the caller as an execution exit |

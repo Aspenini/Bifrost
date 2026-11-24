@@ -102,6 +102,12 @@ impl Arm64Lifter {
                 ir.write(dst, value);
                 ir.next(next)
             }
+            Operation::MoveWord { dst, src } => {
+                let source = ir.read(src);
+                let value = ir.with_immediate(IntOp::And, source, u64::from(u32::MAX));
+                ir.write(dst, value);
+                ir.next(next)
+            }
             Operation::MoveKeep { dst, bits, shift } => {
                 let current = ir.read(dst);
                 let kept = ir.with_immediate(IntOp::And, current, !(0xffff_u64 << shift));
@@ -130,7 +136,18 @@ impl Arm64Lifter {
                 base,
                 offset,
                 load,
+            }
+            | Operation::ByteMemory {
+                reg,
+                base,
+                offset,
+                load,
             } => {
+                let byte = matches!(instruction.operation(), Operation::ByteMemory { .. });
+                let layout = MemoryLayout {
+                    ty: if byte { Type::I8 } else { Type::I64 },
+                    ..QWORD
+                };
                 let base = ir.read(base);
                 let address = ir.with_immediate(IntOp::Add, base, offset);
                 let address = ir.address(address);
@@ -143,21 +160,27 @@ impl Arm64Lifter {
                     out,
                     address,
                     access,
-                    layout: QWORD,
+                    layout,
                 });
                 if load {
-                    let value = ir.value(|out| Op::Load {
-                        out,
-                        guard,
-                        layout: QWORD,
-                    });
+                    let value = ir.value(|out| Op::Load { out, guard, layout });
+                    let value = if byte {
+                        ir.cast(value, Type::I64)
+                    } else {
+                        value
+                    };
                     ir.write(reg, value);
                 } else {
                     let value = ir.read(reg);
+                    let value = if byte {
+                        ir.cast(value, Type::I8)
+                    } else {
+                        value
+                    };
                     ir.emit(Op::Store {
                         guard,
                         value,
-                        layout: QWORD,
+                        layout,
                     });
                 }
                 ir.next(next)
