@@ -10,6 +10,8 @@ The raw profile uses little-endian A64 instructions and serialized execution ove
 | Address generation | ADR and ADRP |
 | Logical | 32-bit and 64-bit AND, ORR, EOR and ANDS with a bitmask immediate or shifted register, plus shifted-register BIC, ORN, EON and BICS |
 | Bitfield | 32-bit and 64-bit BFM, SBFM and UBFM, including immediate shift and sign-extension aliases |
+| Bit operations | 32-bit and 64-bit RBIT, CLZ, and CLS |
+| Variable shifts | 32-bit and 64-bit LSLV, LSRV, ASRV and RORV |
 | Memory | 32-bit and 64-bit unsigned scaled immediate and signed pre/post-indexed LDR/STR, signed unscaled immediate LDUR/STUR, unsigned immediate LDRB/STRB, and signed unscaled immediate LDURB/STURB with Xn base |
 | Register-offset memory | Unsigned byte, halfword, word and doubleword loads and stores with Xn base and UXTW, SXTW, SXTX or LSL offset |
 | Paired memory | 32-bit and 64-bit signed-offset LDP/STP with Xn base, distinct LDP destinations, and no writeback |

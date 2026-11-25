@@ -301,6 +301,9 @@ impl Values {
                 self.integer(count)?;
                 (out, ty)
             }
+            Op::ReverseBits { out, value } | Op::CountLeadingBits { out, value, .. } => {
+                (out, self.integer(value)?)
+            }
             Op::Select {
                 out,
                 condition,

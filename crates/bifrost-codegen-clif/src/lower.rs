@@ -172,6 +172,32 @@ impl Lowering<'_> {
                 let count = self.values[&count].value;
                 (out, self.shift(value, count, op, rule), value.width)
             }
+            Op::ReverseBits { out, value } => {
+                let Scalar { value, width } = self.values[&value];
+                let reversed = self.builder.ins().bitrev(value);
+                let reversed = self
+                    .builder
+                    .ins()
+                    .ushr_imm_u(reversed, i64::from(64 - width));
+                (out, reversed, width)
+            }
+            Op::CountLeadingBits { out, value, sign } => {
+                let scalar = self.values[&value];
+                let bits = if sign {
+                    let extended = self.signed(scalar);
+                    let fill = self.builder.ins().sshr_imm_u(extended, 63);
+                    let bits = self.builder.ins().bxor(scalar.value, fill);
+                    self.mask(bits, scalar.width)
+                } else {
+                    scalar.value
+                };
+                let count = self.builder.ins().clz(bits);
+                let count = self
+                    .builder
+                    .ins()
+                    .iadd_imm_s(count, i64::from(scalar.width) - 64 - i64::from(sign));
+                (out, count, scalar.width)
+            }
             Op::Select {
                 out,
                 condition,

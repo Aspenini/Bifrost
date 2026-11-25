@@ -36,6 +36,17 @@ pub enum RegisterShift {
     RotateRight,
 }
 
+impl RegisterShift {
+    fn decode(bits: u32) -> Self {
+        match bits & 3 {
+            0 => Self::Left,
+            1 => Self::LogicalRight,
+            2 => Self::ArithmeticRight,
+            _ => Self::RotateRight,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Bitfield {
     Signed,
@@ -118,6 +129,24 @@ pub enum Operation {
         src_start: u8,
         dst_start: u8,
         len: u8,
+        word: bool,
+    },
+    ReverseBits {
+        dst: Reg,
+        src: Reg,
+        word: bool,
+    },
+    CountLeadingBits {
+        dst: Reg,
+        src: Reg,
+        word: bool,
+        sign: bool,
+    },
+    VariableShift {
+        dst: Reg,
+        src: Reg,
+        count: Reg,
+        shift: RegisterShift,
         word: bool,
     },
     Memory {
@@ -427,6 +456,21 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
     if let Some(operation) = pointer_auth(word) {
         return Operation::PointerAuth(operation);
     }
+    if word & 0x7fff_fc00 == 0x5ac0_0000 {
+        return Operation::ReverseBits {
+            dst,
+            src: lhs,
+            word: word >> 31 == 0,
+        };
+    }
+    if matches!(word & 0x7fff_fc00, 0x5ac0_1000 | 0x5ac0_1400) {
+        return Operation::CountLeadingBits {
+            dst,
+            src: lhs,
+            word: word >> 31 == 0,
+            sign: word & (1 << 10) != 0,
+        };
+    }
     if word & 0x1f00_0000 == 0x1000_0000 {
         let imm = ((word >> 5) & 0x7ffff) << 2 | ((word >> 29) & 3);
         let displacement = sign_extend(imm, 21);
@@ -490,12 +534,7 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
         if narrow && amount >= 32 {
             return Operation::Undefined;
         }
-        let shift = match (word >> 22) & 3 {
-            0 => RegisterShift::Left,
-            1 => RegisterShift::LogicalRight,
-            2 => RegisterShift::ArithmeticRight,
-            _ => RegisterShift::RotateRight,
-        };
+        let shift = RegisterShift::decode(word >> 22);
         return Operation::LogicalRegister {
             kind: logical_kind(word),
             dst,
@@ -563,6 +602,15 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
     if word & 0x1fe0_fc00 == 0x0b00_0000 {
         let rhs = Operand::Register(reg(word >> 16, false));
         return arithmetic(word, dst, lhs, rhs);
+    }
+    if word & 0x7fe0_f000 == 0x1ac0_2000 {
+        return Operation::VariableShift {
+            dst,
+            src: lhs,
+            count: reg(word >> 16, false),
+            shift: RegisterShift::decode(word >> 10),
+            word: word >> 31 == 0,
+        };
     }
     if word & 0x7fe0_0000 == 0x1b00_0000 {
         return Operation::MultiplyAccumulate {

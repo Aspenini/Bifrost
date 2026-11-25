@@ -40,6 +40,10 @@ pub(crate) fn instruction(
             out,
             data(locals, value).shift(op, data(locals, count).bits, rule),
         ),
+        Op::ReverseBits { out, value } => (out, data(locals, value).reverse_bits()),
+        Op::CountLeadingBits { out, value, sign } => {
+            (out, data(locals, value).count_leading_bits(sign))
+        }
         Op::Select {
             out,
             condition,

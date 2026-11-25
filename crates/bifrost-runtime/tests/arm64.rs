@@ -346,6 +346,16 @@ fn scalar_arithmetic_and_logic_use_the_correct_width_and_flags() {
         (0x0a42_1020, 0xff, 0xdeb0, 0xeb, NZCV),       // and w0,w1,w2,lsr #4
         (0x6a22_0420, 2, 1, 0, 0x4000_0000),           // bics w0,w1,w2,lsl #1
         (0xd343_fc20, 8, 0, 0x1579_a246_8000_0001, NZCV), // lsr x0,x1,#3
+        (0xdac0_0020, 1, 0, 0x8000_0000_2c48_b3d5, NZCV), // rbit x0,x1
+        (0x5ac0_0020, 0x8000_000f, 0, 0xf000_0001, NZCV), // rbit w0,w1
+        (0xdac0_1020, 0, 0, 0, NZCV),                  // clz x0,x1
+        (0x5ac0_1020, 0, 0, 32, NZCV),                 // clz w0,w1 with zero low word
+        (0x5ac0_1420, 0xff00_0000, 0, 7, NZCV),        // cls w0,w1 with negative low word
+        (0x5ac0_1420, 0x0400_0000, 0, 4, NZCV),        // cls w0,w1 with positive low word
+        (0x9ac2_2020, 1, 65, 0x579a_2468_0000_0002, NZCV), // lsl x0,x1,x2 (count wraps to 1)
+        (0x1ac2_2420, 0x8000_0000, 33, 0x4000_0000, NZCV), // lsr w0,w1,w2
+        (0x1ac2_2820, 0x8000_0000, 33, 0xc000_0000, NZCV), // asr w0,w1,w2
+        (0x1ac2_2c20, 1, 33, 0x8000_0000, NZCV),       // ror w0,w1,w2
         (0x5318_5c20, 0x1234_5678, 0, 0x3456_7800, NZCV), // lsl w0,w1,#8
         (0x1304_7c20, 0x8123_4567, 0, 0xf812_3456, NZCV), // asr w0,w1,#4
         (0x9340_1c20, 0x80, 0, u64::MAX - 127, NZCV),  // sxtb x0,w1

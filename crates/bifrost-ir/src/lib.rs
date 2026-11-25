@@ -238,6 +238,15 @@ pub enum Op {
         count: ValueId,
         rule: ShiftCount,
     },
+    ReverseBits {
+        out: ValueId,
+        value: ValueId,
+    },
+    CountLeadingBits {
+        out: ValueId,
+        value: ValueId,
+        sign: bool,
+    },
     Select {
         out: ValueId,
         condition: ValueId,

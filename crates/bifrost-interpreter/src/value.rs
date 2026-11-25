@@ -8,6 +8,24 @@ pub(crate) struct Value {
 }
 
 impl Value {
+    pub(crate) fn count_leading_bits(self, sign: bool) -> Self {
+        let width = self.ty.bit_width();
+        let bits = if sign && self.signed() < 0 {
+            self.bits ^ mask(width)
+        } else {
+            self.bits
+        };
+        let count = bits.leading_zeros() - (128 - width) - u32::from(sign);
+        Self::new(self.ty, u128::from(count))
+    }
+
+    pub(crate) fn reverse_bits(self) -> Self {
+        Self::new(
+            self.ty,
+            self.bits.reverse_bits() >> (128 - self.ty.bit_width()),
+        )
+    }
+
     pub(crate) const fn new(ty: Type, bits: u128) -> Self {
         Self {
             bits: bits & mask(ty.bit_width()),

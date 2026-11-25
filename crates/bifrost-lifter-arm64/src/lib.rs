@@ -197,6 +197,56 @@ impl Arm64Lifter {
                 ir.write(dst, result);
                 ir.next(next)
             }
+            Operation::ReverseBits { dst, src, word } => {
+                let value = ir.read(src);
+                let value = if word {
+                    ir.cast(value, Type::I32)
+                } else {
+                    value
+                };
+                let result = ir.value(|out| Op::ReverseBits { out, value });
+                let result = if word {
+                    ir.cast(result, Type::I64)
+                } else {
+                    result
+                };
+                ir.write(dst, result);
+                ir.next(next)
+            }
+            Operation::CountLeadingBits {
+                dst,
+                src,
+                word,
+                sign,
+            } => {
+                let value = ir.read(src);
+                let value = if word {
+                    ir.cast(value, Type::I32)
+                } else {
+                    value
+                };
+                let result = ir.value(|out| Op::CountLeadingBits { out, value, sign });
+                let result = if word {
+                    ir.cast(result, Type::I64)
+                } else {
+                    result
+                };
+                ir.write(dst, result);
+                ir.next(next)
+            }
+            Operation::VariableShift {
+                dst,
+                src,
+                count,
+                shift,
+                word,
+            } => {
+                let value = ir.read(src);
+                let count = ir.read(count);
+                let result = ir.shifted(value, shift, count, word);
+                ir.write(dst, result);
+                ir.next(next)
+            }
             Operation::Arithmetic {
                 dst,
                 lhs,
@@ -626,12 +676,22 @@ impl Builder {
         if amount == 0 {
             return value;
         }
+        let count = self.integer(u64::from(amount));
+        self.shifted(value, shift, count, word)
+    }
+
+    fn shifted(
+        &mut self,
+        value: ValueId,
+        shift: RegisterShift,
+        count: ValueId,
+        word: bool,
+    ) -> ValueId {
         let value = if word {
             self.cast(value, Type::I32)
         } else {
             value
         };
-        let count = self.integer(u64::from(amount));
         let op = match shift {
             RegisterShift::Left => ShiftOp::Left,
             RegisterShift::LogicalRight => ShiftOp::LogicalRight,
