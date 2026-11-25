@@ -404,15 +404,19 @@ impl Values {
                 replacement,
                 layout,
             } => {
-                if !matches!(layout.ty, Type::I8 | Type::I16 | Type::I32 | Type::I64)
-                    || layout.endian != crate::Endian::Little
-                    || layout.ty.storage_bytes() != Some(layout.alignment)
-                {
-                    return Err(VerifyErrorKind::InvalidMemoryLayout(layout));
-                }
                 self.expect(expected, layout.ty)?;
                 self.expect(replacement, layout.ty)?;
-                self.consume_guard(guard, MemoryAccess::Write, layout, pc)?;
+                self.consume_atomic_guard(guard, layout, pc)?;
+                (out, layout.ty)
+            }
+            Op::AtomicAdd {
+                out,
+                guard,
+                addend,
+                layout,
+            } => {
+                self.expect(addend, layout.ty)?;
+                self.consume_atomic_guard(guard, layout, pc)?;
                 (out, layout.ty)
             }
             Op::LoadPair64 {
@@ -440,6 +444,21 @@ impl Values {
             }
         };
         self.define(out, Value::Data(ty))
+    }
+
+    fn consume_atomic_guard(
+        &mut self,
+        guard: ValueId,
+        layout: MemoryLayout,
+        pc: GuestAddress,
+    ) -> Result<(), VerifyErrorKind> {
+        if !matches!(layout.ty, Type::I8 | Type::I16 | Type::I32 | Type::I64)
+            || layout.endian != crate::Endian::Little
+            || layout.ty.storage_bytes() != Some(layout.alignment)
+        {
+            return Err(VerifyErrorKind::InvalidMemoryLayout(layout));
+        }
+        self.consume_guard(guard, MemoryAccess::Write, layout, pc)
     }
 
     fn exit(

@@ -687,6 +687,48 @@ fn compare_exchange_returns_the_old_value_and_faults_before_writeback() {
 }
 
 #[test]
+fn atomic_add_returns_the_old_value_and_wraps_at_the_access_width() {
+    let (mut memory, mut thread) = memory_and_thread(&[0xb8e1_0002], Protection::ReadWrite);
+    let initial = [0xff, 0xff, 0xff, 0xff, 0x66];
+    memory.write(DATA, &initial).unwrap();
+    let CpuState::AArch64(cpu) = &mut thread.cpu else {
+        unreachable!()
+    };
+    cpu.x[0] = DATA.0;
+    cpu.x[1] = 2;
+    let original = thread.clone();
+    let exit = RawInterpreter::new(&target(), &mut memory, &mut ())
+        .unwrap()
+        .step(&mut thread)
+        .unwrap();
+    let check = |thread: &GuestThread, memory: &AddressSpace| {
+        assert_eq!(state(thread).x[1..3], [2, u64::from(u32::MAX)]);
+        let mut bytes = [0; 5];
+        memory.read(DATA, &mut bytes).unwrap();
+        assert_eq!(bytes, [1, 0, 0, 0, 0x66]);
+    };
+    assert_eq!(exit, ExitReason::Dispatch(Addr(CODE.0 + 4)));
+    check(&thread, &memory);
+    #[cfg(all(
+        feature = "jit-cranelift",
+        any(target_arch = "x86_64", target_arch = "aarch64"),
+        any(target_os = "linux", target_os = "windows")
+    ))]
+    {
+        use bifrost_runtime::raw::{RawJit, SystemJitMemory};
+        memory.write(DATA, &initial).unwrap();
+        let mut jitted = original;
+        let actual = RawJit::new(&target(), &mut memory, &mut (), SystemJitMemory)
+            .unwrap()
+            .step(&mut jitted)
+            .unwrap();
+        assert_eq!(actual, exit);
+        assert_eq!(jitted, thread);
+        check(&jitted, &memory);
+    }
+}
+
+#[test]
 fn validates_arm64_feature_requirements_at_construction() {
     let (mut memory, _) = memory_and_thread(&[0xd503_201f], Protection::ReadWrite);
     for feature in [CpuFeature::Neon, CpuFeature::Lse] {

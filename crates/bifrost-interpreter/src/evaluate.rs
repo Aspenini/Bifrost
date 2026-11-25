@@ -186,6 +186,20 @@ pub(crate) fn instruction(
                 .map_err(|err| memory_error(pc, thread, AccessKind::Write, err))?;
             (out, Value::new(layout.ty, u128::from(previous)))
         }
+        Op::AtomicAdd {
+            out,
+            guard,
+            addend,
+            layout,
+        } => {
+            let address = guarded_address(locals, guard);
+            let width = check_access(pc, thread, address, AccessKind::Write, layout)?;
+            let addend = data(locals, addend).bits as u64;
+            let previous = memory
+                .fetch_add_le(address, width, addend)
+                .map_err(|err| memory_error(pc, thread, AccessKind::Write, err))?;
+            (out, Value::new(layout.ty, u128::from(previous)))
+        }
         Op::StorePair64 {
             first,
             second,

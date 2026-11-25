@@ -308,6 +308,10 @@ impl MemoryContext<'_> {
             self.memory
                 .compare_exchange_le(address, width, value as u64, (value >> 64) as u64)
                 .map(u128::from)
+        } else if options & lower::MEMORY_ATOMIC_ADD != 0 {
+            self.memory
+                .fetch_add_le(address, width, value as u64)
+                .map(u128::from)
         } else if write {
             let bytes = if big_endian {
                 value.to_be_bytes()

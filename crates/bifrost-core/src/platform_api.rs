@@ -52,20 +52,45 @@ pub trait GuestMemory: GuestMemoryRead {
         expected: u64,
         replacement: u64,
     ) -> Result<u64, MemoryError> {
-        if !matches!(width, 1 | 2 | 4 | 8) {
-            return Err(MemoryError::InvalidRegion {
-                start: address,
-                len: width as u64,
-            });
-        }
-        self.check_write(address, width)?;
-        let mut previous = [0; 8];
-        self.read(address, &mut previous[..width])?;
+        let previous = read_atomic_value(self, address, width)?;
         if previous[..width] == expected.to_le_bytes()[..width] {
             self.write(address, &replacement.to_le_bytes()[..width])?;
         }
         Ok(u64::from_le_bytes(previous))
     }
+
+    /// Adds to a little-endian scalar with width-specific wrapping and returns the old value.
+    /// Shared backing stores must override this method to serialize the entire operation.
+    fn fetch_add_le(
+        &mut self,
+        address: GuestAddress,
+        width: usize,
+        addend: u64,
+    ) -> Result<u64, MemoryError> {
+        let previous = u64::from_le_bytes(read_atomic_value(self, address, width)?);
+        self.write(
+            address,
+            &previous.wrapping_add(addend).to_le_bytes()[..width],
+        )?;
+        Ok(previous)
+    }
+}
+
+fn read_atomic_value(
+    memory: &(impl GuestMemory + ?Sized),
+    address: GuestAddress,
+    width: usize,
+) -> Result<[u8; 8], MemoryError> {
+    if !matches!(width, 1 | 2 | 4 | 8) {
+        return Err(MemoryError::InvalidRegion {
+            start: address,
+            len: width as u64,
+        });
+    }
+    memory.check_write(address, width)?;
+    let mut previous = [0; 8];
+    memory.read(address, &mut previous[..width])?;
+    Ok(previous)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

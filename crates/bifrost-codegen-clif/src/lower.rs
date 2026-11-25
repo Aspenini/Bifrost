@@ -34,6 +34,7 @@ pub(crate) const DIV_UNSIGNED: u32 = 1 << 18;
 pub(crate) const DIV_SIGNED: u32 = 2 << 18;
 pub(crate) const MEMORY_WRITE: u32 = 1 << 17;
 pub(crate) const MEMORY_COMPARE_EXCHANGE: u32 = 1 << 20;
+pub(crate) const MEMORY_ATOMIC_ADD: u32 = 1 << 21;
 
 pub(crate) fn into_function(
     function: &mut Function,
@@ -343,6 +344,20 @@ impl Lowering<'_> {
                     self.values[&expected].value,
                     layout,
                     MEMORY_WRITE | MEMORY_COMPARE_EXCHANGE,
+                )?;
+                (out, self.load(HELPER_VALUE), layout.ty.bit_width())
+            }
+            Op::AtomicAdd {
+                out,
+                guard,
+                addend,
+                layout,
+            } => {
+                self.memory_access(
+                    guard,
+                    self.values[&addend].value,
+                    layout,
+                    MEMORY_WRITE | MEMORY_ATOMIC_ADD,
                 )?;
                 (out, self.load(HELPER_VALUE), layout.ty.bit_width())
             }

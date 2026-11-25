@@ -220,6 +220,14 @@ pub enum Operation {
         acquire: bool,
         release: bool,
     },
+    AtomicAdd {
+        dst: Reg,
+        addend: Reg,
+        base: Reg,
+        size_log2: u8,
+        acquire: bool,
+        release: bool,
+    },
     OrderedMemory {
         reg: Reg,
         base: Reg,
@@ -839,6 +847,16 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
             size_log2: (word >> 30) as u8,
             acquire: word & (1 << 22) != 0 && dst != Reg::Zero,
             release: word & (1 << 15) != 0,
+        };
+    }
+    if word & 0x3f20_fc00 == 0x3820_0000 {
+        return Operation::AtomicAdd {
+            dst,
+            addend: reg(word >> 16, false),
+            base,
+            size_log2: (word >> 30) as u8,
+            acquire: word & (1 << 23) != 0 && dst != Reg::Zero,
+            release: word & (1 << 22) != 0,
         };
     }
     if word & 0x3fa0_0c00 == 0x3820_0800 {
