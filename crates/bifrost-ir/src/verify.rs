@@ -397,6 +397,24 @@ impl Values {
                 self.expect(value, layout.ty)?;
                 return self.consume_guard(guard, MemoryAccess::Write, layout, pc);
             }
+            Op::CompareExchange {
+                out,
+                guard,
+                expected,
+                replacement,
+                layout,
+            } => {
+                if !matches!(layout.ty, Type::I8 | Type::I16 | Type::I32 | Type::I64)
+                    || layout.endian != crate::Endian::Little
+                    || layout.ty.storage_bytes() != Some(layout.alignment)
+                {
+                    return Err(VerifyErrorKind::InvalidMemoryLayout(layout));
+                }
+                self.expect(expected, layout.ty)?;
+                self.expect(replacement, layout.ty)?;
+                self.consume_guard(guard, MemoryAccess::Write, layout, pc)?;
+                (out, layout.ty)
+            }
             Op::LoadPair64 {
                 first,
                 second,

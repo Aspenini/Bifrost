@@ -32,6 +32,8 @@ pub(crate) const ALIGNMENT_READ: i64 = 5;
 pub(crate) const ALIGNMENT_WRITE: i64 = 6;
 pub(crate) const DIV_UNSIGNED: u32 = 1 << 18;
 pub(crate) const DIV_SIGNED: u32 = 2 << 18;
+pub(crate) const MEMORY_WRITE: u32 = 1 << 17;
+pub(crate) const MEMORY_COMPARE_EXCHANGE: u32 = 1 << 20;
 
 pub(crate) fn into_function(
     function: &mut Function,
@@ -314,7 +316,7 @@ impl Lowering<'_> {
                     return Err(self.unsupported("memory width"));
                 }
                 let zero = self.immediate(0);
-                self.memory_access(guard, zero, layout, false)?;
+                self.memory_access(guard, zero, layout, 0)?;
                 let value = self.load(HELPER_VALUE);
                 (out, value, layout.ty.bit_width())
             }
@@ -326,7 +328,23 @@ impl Lowering<'_> {
                 if layout.ty.bit_width() > 64 {
                     return Err(self.unsupported("memory width"));
                 }
-                return self.memory_access(guard, self.values[&value].value, layout, true);
+                return self.memory_access(guard, self.values[&value].value, layout, MEMORY_WRITE);
+            }
+            Op::CompareExchange {
+                out,
+                guard,
+                expected,
+                replacement,
+                layout,
+            } => {
+                self.store(HELPER_HIGH, self.values[&replacement].value);
+                self.memory_access(
+                    guard,
+                    self.values[&expected].value,
+                    layout,
+                    MEMORY_WRITE | MEMORY_COMPARE_EXCHANGE,
+                )?;
+                (out, self.load(HELPER_VALUE), layout.ty.bit_width())
             }
             Op::LoadPair64 {
                 first,
@@ -334,7 +352,7 @@ impl Lowering<'_> {
                 guard,
             } => {
                 let zero = self.immediate(0);
-                self.memory_access(guard, zero, MemoryLayout::I64_PAIR_LE, false)?;
+                self.memory_access(guard, zero, MemoryLayout::I64_PAIR_LE, 0)?;
                 for (out, offset) in [(first, HELPER_VALUE), (second, HELPER_HIGH)] {
                     let value = self.builder.ins().load(
                         types::I64,
@@ -356,7 +374,7 @@ impl Lowering<'_> {
                     guard,
                     self.values[&first].value,
                     MemoryLayout::I64_PAIR_LE,
-                    true,
+                    MEMORY_WRITE,
                 );
             }
             _ => return Err(self.unsupported("IR operation")),
@@ -375,7 +393,7 @@ impl Lowering<'_> {
         guard: ValueId,
         value: Value,
         layout: MemoryLayout,
-        write: bool,
+        flags: u32,
     ) -> Result<(), CompileError> {
         let width = layout
             .ty
@@ -384,7 +402,7 @@ impl Lowering<'_> {
             .ok_or_else(|| self.unsupported("memory width"))?;
         let mut options = u32::from(width) | (u32::from(layout.alignment) << 8);
         options |= u32::from(layout.endian == Endian::Big) << 16;
-        options |= u32::from(write) << 17;
+        options |= flags;
         let status = self.call_helper(self.guards[&guard], value, options);
         let fault = self.builder.create_block();
         let success = self.builder.create_block();

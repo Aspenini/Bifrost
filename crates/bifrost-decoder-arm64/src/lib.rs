@@ -212,6 +212,14 @@ pub enum Operation {
         offset: u64,
         load: bool,
     },
+    CompareExchange {
+        expected: Reg,
+        replacement: Reg,
+        base: Reg,
+        size_log2: u8,
+        acquire: bool,
+        release: bool,
+    },
     WordMemory {
         reg: Reg,
         base: Reg,
@@ -809,6 +817,16 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
         };
     }
     let base = reg(word >> 5, true);
+    if word & 0x3fa0_7c00 == 0x08a0_7c00 {
+        return Operation::CompareExchange {
+            expected: reg(word >> 16, false),
+            replacement: dst,
+            base,
+            size_log2: (word >> 30) as u8,
+            acquire: word & (1 << 22) != 0 && dst != Reg::Zero,
+            release: word & (1 << 15) != 0,
+        };
+    }
     if word & 0x3fa0_0c00 == 0x3820_0800 {
         let extend = match (word >> 13) & 7 {
             2 => AddressExtend::UnsignedWord,

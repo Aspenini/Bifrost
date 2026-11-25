@@ -170,6 +170,22 @@ pub(crate) fn instruction(
             locals.insert(first, Local::Data(Value::new(Type::I64, pair)));
             (second, Value::new(Type::I64, pair >> 64))
         }
+        Op::CompareExchange {
+            out,
+            guard,
+            expected,
+            replacement,
+            layout,
+        } => {
+            let address = guarded_address(locals, guard);
+            let width = check_access(pc, thread, address, AccessKind::Write, layout)?;
+            let expected = data(locals, expected).bits as u64;
+            let replacement = data(locals, replacement).bits as u64;
+            let previous = memory
+                .compare_exchange_le(address, width, expected, replacement)
+                .map_err(|err| memory_error(pc, thread, AccessKind::Write, err))?;
+            (out, Value::new(layout.ty, u128::from(previous)))
+        }
         Op::StorePair64 {
             first,
             second,

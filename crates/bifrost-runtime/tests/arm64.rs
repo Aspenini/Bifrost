@@ -621,6 +621,70 @@ fn thread_pointer_instructions_keep_the_read_only_pointer_separate() {
 }
 
 #[test]
+fn compare_exchange_returns_the_old_value_and_faults_before_writeback() {
+    for (expected, alignment, protection, changed) in [
+        (7, 0, Protection::ReadWrite, true),
+        (9, 0, Protection::ReadWrite, false),
+        (7, 0, Protection::Read, false),
+        (7, 1, Protection::ReadWrite, false),
+    ] {
+        let (mut memory, mut thread) = memory_and_thread(&[0x88e1_7c02], Protection::ReadWrite);
+        memory.write(DATA, &7u32.to_le_bytes()).unwrap();
+        memory.protect(DATA, 4096, protection).unwrap();
+        let CpuState::AArch64(cpu) = &mut thread.cpu else {
+            unreachable!()
+        };
+        cpu.x[0] = DATA.0 + alignment;
+        cpu.x[1] = (1 << 40) | expected;
+        cpu.x[2] = 42;
+        let original = thread.clone();
+        let exit = RawInterpreter::new(&target(), &mut memory, &mut ())
+            .unwrap()
+            .step(&mut thread)
+            .unwrap();
+        let check = |exit, actual: &GuestThread, memory: &AddressSpace| {
+            let mut bytes = [0; 4];
+            memory.read(DATA, &mut bytes).unwrap();
+            assert_eq!(u32::from_le_bytes(bytes), if changed { 42 } else { 7 });
+            let fault = match (alignment, protection) {
+                (1, _) => Some(FaultClass::Alignment),
+                (_, Protection::Read) => Some(FaultClass::Protection),
+                _ => None,
+            };
+            if let Some(class) = fault {
+                assert!(
+                    matches!(exit, ExitReason::Fault(fault) if fault.class == class && fault.pc == CODE)
+                );
+                assert_eq!(actual.cpu, original.cpu);
+            } else {
+                assert_eq!(exit, ExitReason::Dispatch(Addr(CODE.0 + 4)));
+                assert_eq!(state(actual).x[1], 7);
+            }
+        };
+        check(exit, &thread, &memory);
+        #[cfg(all(
+            feature = "jit-cranelift",
+            any(target_arch = "x86_64", target_arch = "aarch64"),
+            any(target_os = "linux", target_os = "windows")
+        ))]
+        {
+            use bifrost_runtime::raw::{RawJit, SystemJitMemory};
+            if changed {
+                memory.write(DATA, &7u32.to_le_bytes()).unwrap();
+            }
+            let mut jitted = original.clone();
+            let actual = RawJit::new(&target(), &mut memory, &mut (), SystemJitMemory)
+                .unwrap()
+                .step(&mut jitted)
+                .unwrap();
+            check(actual, &jitted, &memory);
+            assert_eq!(actual, exit);
+            assert_eq!(jitted, thread);
+        }
+    }
+}
+
+#[test]
 fn validates_arm64_feature_requirements_at_construction() {
     let (mut memory, _) = memory_and_thread(&[0xd503_201f], Protection::ReadWrite);
     for feature in [CpuFeature::Neon, CpuFeature::Lse] {

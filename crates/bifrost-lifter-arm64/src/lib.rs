@@ -408,6 +408,49 @@ impl Arm64Lifter {
                 ir.write(base, updated);
                 ir.next(next)
             }
+            Operation::CompareExchange {
+                expected,
+                replacement,
+                base,
+                size_log2,
+                acquire,
+                release,
+            } => {
+                let base = ir.memory_base(base, false);
+                let address = ir.address(base);
+                let ty = [Type::I8, Type::I16, Type::I32, Type::I64][usize::from(size_log2)];
+                let layout = MemoryLayout {
+                    ty,
+                    alignment: 1 << size_log2,
+                    endian: Endian::Little,
+                };
+                let guard = ir.value(|out| Op::Guard {
+                    out,
+                    address,
+                    access: MemoryAccess::Write,
+                    layout,
+                });
+                let compare = ir.read(expected);
+                let compare = ir.cast(compare, ty);
+                let store = ir.read(replacement);
+                let store = ir.cast(store, ty);
+                if release {
+                    ir.emit(Op::Fence);
+                }
+                let result = ir.value(|out| Op::CompareExchange {
+                    out,
+                    guard,
+                    expected: compare,
+                    replacement: store,
+                    layout,
+                });
+                if acquire {
+                    ir.emit(Op::Fence);
+                }
+                let bits = ir.cast(result, Type::I64);
+                ir.write(expected, bits);
+                ir.next(next)
+            }
             Operation::RegisterOffsetMemory {
                 reg,
                 base,

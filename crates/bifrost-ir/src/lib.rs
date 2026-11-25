@@ -312,6 +312,13 @@ pub enum Op {
         value: ValueId,
         layout: MemoryLayout,
     },
+    CompareExchange {
+        out: ValueId,
+        guard: ValueId,
+        expected: ValueId,
+        replacement: ValueId,
+        layout: MemoryLayout,
+    },
     /// Read one contiguous 16-byte range into two little-endian scalar values.
     LoadPair64 {
         first: ValueId,

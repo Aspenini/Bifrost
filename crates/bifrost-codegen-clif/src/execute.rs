@@ -284,7 +284,7 @@ impl MemoryContext<'_> {
         let alignment =
             NonZeroU8::new((options >> 8) as u8).expect("generated alignment is nonzero");
         let big_endian = options & (1 << 16) != 0;
-        let write = options & (1 << 17) != 0;
+        let write = options & lower::MEMORY_WRITE != 0;
         let access = if write {
             AccessKind::Write
         } else {
@@ -304,7 +304,11 @@ impl MemoryContext<'_> {
         let width = usize::from(width.get());
         let start = if big_endian { 16 - width } else { 0 };
         let range = start..start + width;
-        let result = if write {
+        let result = if options & lower::MEMORY_COMPARE_EXCHANGE != 0 {
+            self.memory
+                .compare_exchange_le(address, width, value as u64, (value >> 64) as u64)
+                .map(u128::from)
+        } else if write {
             let bytes = if big_endian {
                 value.to_be_bytes()
             } else {

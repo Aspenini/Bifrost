@@ -42,6 +42,30 @@ pub trait GuestMemory: GuestMemoryRead {
     fn check_write(&self, _address: GuestAddress, _len: usize) -> Result<(), MemoryError> {
         Err(MemoryError::WriteCheckUnavailable)
     }
+
+    /// Returns the previous value and writes the replacement only on a match.
+    /// Shared backing stores must override this method to serialize the entire operation.
+    fn compare_exchange_le(
+        &mut self,
+        address: GuestAddress,
+        width: usize,
+        expected: u64,
+        replacement: u64,
+    ) -> Result<u64, MemoryError> {
+        if !matches!(width, 1 | 2 | 4 | 8) {
+            return Err(MemoryError::InvalidRegion {
+                start: address,
+                len: width as u64,
+            });
+        }
+        self.check_write(address, width)?;
+        let mut previous = [0; 8];
+        self.read(address, &mut previous[..width])?;
+        if previous[..width] == expected.to_le_bytes()[..width] {
+            self.write(address, &replacement.to_le_bytes()[..width])?;
+        }
+        Ok(u64::from_le_bytes(previous))
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
