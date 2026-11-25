@@ -386,7 +386,7 @@ impl Arm64Lifter {
                 };
                 let base = ir.memory_base(base, load);
                 let address = ir.with_immediate(IntOp::Add, base, offset);
-                ir.access_scalar(reg, address, ty, load);
+                ir.access_scalar(reg, address, MemoryLayout { ty, ..QWORD }, load);
                 ir.next(next)
             }
             Operation::IndexedMemory {
@@ -402,7 +402,10 @@ impl Arm64Lifter {
                 ir.access_scalar(
                     reg,
                     if pre_index { updated } else { original },
-                    [Type::I8, Type::I16, Type::I32, Type::I64][usize::from(size_log2)],
+                    MemoryLayout {
+                        ty: [Type::I8, Type::I16, Type::I32, Type::I64][usize::from(size_log2)],
+                        ..QWORD
+                    },
                     load,
                 );
                 ir.write(base, updated);
@@ -451,6 +454,28 @@ impl Arm64Lifter {
                 ir.write(expected, bits);
                 ir.next(next)
             }
+            Operation::OrderedMemory {
+                reg,
+                base,
+                size_log2,
+                load,
+            } => {
+                let address = ir.memory_base(base, load);
+                let ty = [Type::I8, Type::I16, Type::I32, Type::I64][usize::from(size_log2)];
+                let layout = MemoryLayout {
+                    ty,
+                    alignment: 1 << size_log2,
+                    ..QWORD
+                };
+                if !load {
+                    ir.emit(Op::Fence);
+                }
+                ir.access_scalar(reg, address, layout, load);
+                if load && reg != Reg::Zero {
+                    ir.emit(Op::Fence);
+                }
+                ir.next(next)
+            }
             Operation::RegisterOffsetMemory {
                 reg,
                 base,
@@ -471,7 +496,7 @@ impl Arm64Lifter {
                 );
                 let address = ir.binary(IntOp::Add, base, offset);
                 let ty = [Type::I8, Type::I16, Type::I32, Type::I64][usize::from(size_log2)];
-                ir.access_scalar(reg, address, ty, load);
+                ir.access_scalar(reg, address, MemoryLayout { ty, ..QWORD }, load);
                 ir.next(next)
             }
             Operation::WordPair {
@@ -963,8 +988,8 @@ impl Builder {
         (lhs, rhs, result)
     }
 
-    fn access_scalar(&mut self, reg: Reg, address: ValueId, ty: Type, load: bool) {
-        let layout = MemoryLayout { ty, ..QWORD };
+    fn access_scalar(&mut self, reg: Reg, address: ValueId, layout: MemoryLayout, load: bool) {
+        let ty = layout.ty;
         let address = self.address(address);
         let access = if load {
             MemoryAccess::Read

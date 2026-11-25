@@ -220,6 +220,12 @@ pub enum Operation {
         acquire: bool,
         release: bool,
     },
+    OrderedMemory {
+        reg: Reg,
+        base: Reg,
+        size_log2: u8,
+        load: bool,
+    },
     WordMemory {
         reg: Reg,
         base: Reg,
@@ -817,6 +823,14 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
         };
     }
     let base = reg(word >> 5, true);
+    if let kind @ (0x089f_fc00 | 0x08df_fc00 | 0x38bf_c000) = word & 0x3fff_fc00 {
+        return Operation::OrderedMemory {
+            reg: dst,
+            base,
+            size_log2: (word >> 30) as u8,
+            load: kind != 0x089f_fc00,
+        };
+    }
     if word & 0x3fa0_7c00 == 0x08a0_7c00 {
         return Operation::CompareExchange {
             expected: reg(word >> 16, false),
