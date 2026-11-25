@@ -132,6 +132,56 @@ fn reports_precise_fetch_and_data_faults_and_rejects_unsupported_instructions() 
 }
 
 #[test]
+fn signed_immediate_loads_extend_to_the_destination_width() {
+    let words = [
+        0x3980_0020, // ldrsb x0,[x1]
+        0x79c0_0422, // ldrsh w2,[x1,#2]
+        0xb980_0423, // ldrsw x3,[x1,#4]
+        0x78c0_3024, // ldursh w4,[x1,#3]
+    ];
+    let execute = |#[allow(unused_variables)] jit: bool| {
+        let (mut memory, mut thread) = memory_and_thread(&words, Protection::ReadWrite);
+        memory
+            .write(DATA, &[0xfd, 0, 0xfd, 0xff, 0xfc, 0xff, 0xff, 0xff])
+            .unwrap();
+        let budget = ExecutionBudget {
+            instructions: words.len() as u64,
+        };
+        #[cfg(all(
+            feature = "jit-cranelift",
+            any(target_arch = "x86_64", target_arch = "aarch64"),
+            any(target_os = "linux", target_os = "windows")
+        ))]
+        if jit {
+            use bifrost_runtime::raw::{RawJit, SystemJitMemory};
+            let stop = RawJit::new(&target(), &mut memory, &mut (), SystemJitMemory)
+                .unwrap()
+                .run(&mut thread, budget)
+                .unwrap();
+            assert_eq!(stop, ExitReason::BudgetExhausted);
+            return thread;
+        }
+        let stop = RawInterpreter::new(&target(), &mut memory, &mut ())
+            .unwrap()
+            .run(&mut thread, budget)
+            .unwrap();
+        assert_eq!(stop, ExitReason::BudgetExhausted);
+        thread
+    };
+    let thread = execute(false);
+    assert_eq!(
+        state(&thread).x[..5],
+        [u64::MAX - 2, DATA.0, 0xffff_fffd, u64::MAX - 3, 0xffff_fcff]
+    );
+    #[cfg(all(
+        feature = "jit-cranelift",
+        any(target_arch = "x86_64", target_arch = "aarch64"),
+        any(target_os = "linux", target_os = "windows")
+    ))]
+    assert_eq!(execute(true).cpu, thread.cpu);
+}
+
+#[test]
 fn generic_timer_reads_exit_without_changing_guest_state() {
     use bifrost_runtime::core::Arm64CounterRegister;
 

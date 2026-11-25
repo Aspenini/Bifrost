@@ -462,6 +462,35 @@ impl Arm64Lifter {
                 ir.write(expected, bits);
                 ir.next(next)
             }
+            Operation::LoadSignedImmediate {
+                dst,
+                base,
+                offset,
+                size_log2,
+                word,
+            } => {
+                let base = ir.memory_base(base, true);
+                let address = ir.with_immediate(IntOp::Add, base, offset);
+                let address = ir.address(address);
+                let ty = [Type::I8, Type::I16, Type::I32][usize::from(size_log2)];
+                let layout = MemoryLayout { ty, ..QWORD };
+                let guard = ir.value(|out| Op::Guard {
+                    out,
+                    address,
+                    access: MemoryAccess::Read,
+                    layout,
+                });
+                let value = ir.value(|out| Op::Load { out, guard, layout });
+                let value = ir.cast(value, Type::I64);
+                let value = ir.extend_register(value, 8 << size_log2, true);
+                let value = if word {
+                    ir.extend_register(value, 32, false)
+                } else {
+                    value
+                };
+                ir.write(dst, value);
+                ir.next(next)
+            }
             Operation::OrderedMemory {
                 reg,
                 base,

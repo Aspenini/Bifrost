@@ -240,6 +240,13 @@ pub enum Operation {
         offset: u64,
         load: bool,
     },
+    LoadSignedImmediate {
+        dst: Reg,
+        base: Reg,
+        offset: u64,
+        size_log2: u8,
+        word: bool,
+    },
     IndexedMemory {
         reg: Reg,
         base: Reg,
@@ -907,6 +914,26 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
         };
     }
     let size_log2 = word >> 30;
+    let signed_offset = if word & 0x3f80_0000 == 0x3980_0000 {
+        Some(u64::from((word >> 10) & 0xfff) << size_log2)
+    } else if word & 0x3fa0_0c00 == 0x3880_0000 {
+        Some(sign_extend(word >> 12, 9) as u64)
+    } else {
+        None
+    };
+    if let Some(offset) = signed_offset {
+        let word = word & (1 << 22) != 0;
+        if size_log2 == 3 || (size_log2 == 2 && word) {
+            return Operation::Unsupported;
+        }
+        return Operation::LoadSignedImmediate {
+            dst,
+            base,
+            offset,
+            size_log2: size_log2 as u8,
+            word,
+        };
+    }
     let offset = if word & 0x3f80_0000 == 0x3900_0000 {
         Some(u64::from((word >> 10) & 0xfff) << size_log2)
     } else if word & 0x3fa0_0c00 == 0x3800_0000 {
