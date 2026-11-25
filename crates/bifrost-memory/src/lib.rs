@@ -89,6 +89,15 @@ impl AddressSpace {
         self.page_size
     }
 
+    /// The number of pages currently mapped, including guard pages.
+    pub fn mapped_pages(&self) -> usize {
+        self.pages.len()
+    }
+
+    pub const fn page_capacity(&self) -> usize {
+        self.max_pages
+    }
+
     pub const fn id(&self) -> AddressSpaceId {
         self.id
     }
