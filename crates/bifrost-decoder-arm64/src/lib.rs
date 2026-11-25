@@ -545,10 +545,11 @@ fn pointer_auth(word: u32) -> Option<Arm64PointerAuth> {
 fn operation(word: u32, pc: GuestAddress) -> Operation {
     let dst = reg(word, false);
     let lhs = reg(word >> 5, false);
-    match word {
-        0xd503_201f => return Operation::Nop,
-        0xd503_3bbf => return Operation::Fence, // DMB ISH
-        _ => {}
+    if word == 0xd503_201f {
+        return Operation::Nop;
+    }
+    if word & 0xffff_f0ff == 0xd503_30bf {
+        return Operation::Fence; // DMB, modeled as a full fence.
     }
     if word & 0xffe0_001f == 0xd400_0001 {
         return Operation::SupervisorCall {
