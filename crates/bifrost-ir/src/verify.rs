@@ -72,6 +72,7 @@ pub enum VerifyErrorKind {
     InvalidRegister(Register),
     UndeclaredFeature(CpuFeature),
     InvalidMemoryLayout(MemoryLayout),
+    InvalidAlignment(u8),
     IncompatibleGuard(ValueId),
     UnusedGuard(ValueId),
     BranchArity {
@@ -336,6 +337,15 @@ impl Values {
                     Some(condition) => self.expect(condition, Type::I1),
                     None => Ok(()),
                 };
+            }
+            Op::CheckMemoryAlignment {
+                address, alignment, ..
+            } => {
+                self.expect(address, Type::GuestAddress)?;
+                if !alignment.is_power_of_two() {
+                    return Err(VerifyErrorKind::InvalidAlignment(alignment));
+                }
+                return Ok(());
             }
             Op::ReadRegister { out, register } => (out, register_type(register)?),
             Op::WriteRegister { register, value } => {

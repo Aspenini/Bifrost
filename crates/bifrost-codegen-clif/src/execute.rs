@@ -177,6 +177,14 @@ impl<Image: ExecutableImage> PublishedBlock<Image> {
             ),
             lower::ILLEGAL => (FaultClass::IllegalInstruction, None),
             lower::TRAP => (FaultClass::Trap(frame.detail as u32), None),
+            lower::ALIGNMENT_READ => (
+                FaultClass::Alignment,
+                Some((GuestAddress(frame.detail), AccessKind::Read)),
+            ),
+            lower::ALIGNMENT_WRITE => (
+                FaultClass::Alignment,
+                Some((GuestAddress(frame.detail), AccessKind::Write)),
+            ),
             lower::HELPER_FAILED => match context.failure {
                 Some(HelperError::Guest(fault)) => (fault.class, fault.memory_access),
                 Some(HelperError::Memory(error)) => return Err(ExecutionError::Memory(error)),

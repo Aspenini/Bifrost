@@ -324,7 +324,7 @@ impl Arm64Lifter {
                     Operation::WordMemory { .. } => Type::I32,
                     _ => Type::I64,
                 };
-                let base = ir.read(base);
+                let base = ir.memory_base(base, load);
                 let address = ir.with_immediate(IntOp::Add, base, offset);
                 ir.access_scalar(reg, address, ty, load);
                 ir.next(next)
@@ -337,7 +337,7 @@ impl Arm64Lifter {
                 word,
                 pre_index,
             } => {
-                let original = ir.read(base);
+                let original = ir.memory_base(base, load);
                 let updated = ir.with_immediate(IntOp::Add, original, offset);
                 ir.access_scalar(
                     reg,
@@ -357,7 +357,7 @@ impl Arm64Lifter {
                 size_log2,
                 load,
             } => {
-                let base = ir.read(base);
+                let base = ir.memory_base(base, load);
                 let index = ir.read(index);
                 let index = match extend {
                     AddressExtend::UnsignedWord => {
@@ -400,7 +400,7 @@ impl Arm64Lifter {
                 } else {
                     QWORD
                 };
-                let base = ir.read(base);
+                let base = ir.memory_base(base, load);
                 let address = ir.with_immediate(IntOp::Add, base, offset);
                 let address = ir.address(address);
                 let access = if load {
@@ -764,6 +764,24 @@ impl Builder {
                 layout,
             });
         }
+    }
+
+    fn memory_base(&mut self, base: Reg, load: bool) -> ValueId {
+        let value = self.read(base);
+        if base == Reg::Sp {
+            let address = self.address(value);
+            let access = if load {
+                MemoryAccess::Read
+            } else {
+                MemoryAccess::Write
+            };
+            self.emit(Op::CheckMemoryAlignment {
+                address,
+                alignment: 16,
+                access,
+            });
+        }
+        value
     }
 
     fn shifted_mask(&mut self, value: ValueId, shift: u64, mask: u64) -> ValueId {

@@ -1,8 +1,8 @@
 use crate::CompileError;
 use bifrost_core::{FaultClass, GuestAddress};
 use bifrost_ir::{
-    AddressConstraint, Arm64Reg, Endian, Exit, IntOp, IntPredicate, IrBlock, MemoryLayout, Op,
-    Register, ShiftCount, ShiftOp, Type, ValueId, X86Reg,
+    AddressConstraint, Arm64Reg, Endian, Exit, IntOp, IntPredicate, IrBlock, MemoryAccess,
+    MemoryLayout, Op, Register, ShiftCount, ShiftOp, Type, ValueId, X86Reg,
 };
 use cranelift_codegen::{
     ir::{
@@ -26,6 +26,8 @@ pub(crate) const NONCANONICAL: i64 = 1;
 pub(crate) const ILLEGAL: i64 = 2;
 pub(crate) const TRAP: i64 = 3;
 pub(crate) const HELPER_FAILED: i64 = 4;
+pub(crate) const ALIGNMENT_READ: i64 = 5;
+pub(crate) const ALIGNMENT_WRITE: i64 = 6;
 
 pub(crate) fn into_function(
     function: &mut Function,
@@ -247,6 +249,28 @@ impl Lowering<'_> {
                 self.builder.switch_to_block(fault);
                 self.store(FAULT_DETAIL, address);
                 self.status(NONCANONICAL);
+                self.builder.switch_to_block(success);
+                return Ok(());
+            }
+            Op::CheckMemoryAlignment {
+                address,
+                alignment,
+                access,
+            } => {
+                let address = self.values[&address].value;
+                let invalid = self
+                    .builder
+                    .ins()
+                    .band_imm_u(address, i64::from(alignment - 1));
+                let fault = self.builder.create_block();
+                let success = self.builder.create_block();
+                self.builder.ins().brif(invalid, fault, &[], success, &[]);
+                self.builder.switch_to_block(fault);
+                self.store(FAULT_DETAIL, address);
+                self.status(match access {
+                    MemoryAccess::Read => ALIGNMENT_READ,
+                    MemoryAccess::Write => ALIGNMENT_WRITE,
+                });
                 self.builder.switch_to_block(success);
                 return Ok(());
             }

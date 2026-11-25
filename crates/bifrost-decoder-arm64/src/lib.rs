@@ -622,81 +622,80 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
             word: word >> 31 == 0,
         };
     }
-    if lhs != Reg::Zero {
-        if word & 0x3fa0_0c00 == 0x3820_0800 {
-            let extend = match (word >> 13) & 7 {
-                2 => AddressExtend::UnsignedWord,
-                6 => AddressExtend::SignedWord,
-                3 | 7 => AddressExtend::Doubleword,
-                _ => return Operation::Undefined,
-            };
-            return Operation::RegisterOffsetMemory {
-                reg: dst,
-                base: lhs,
-                index: reg(word >> 16, false),
-                extend,
-                scale: word & (1 << 12) != 0,
-                size_log2: (word >> 30) as u8,
-                load: word & (1 << 22) != 0,
-            };
-        }
-        let mode = (word >> 10) & 3;
-        if matches!(mode, 1 | 3) && matches!(word & 0xbfe0_0000, 0xb800_0000 | 0xb840_0000) {
-            if dst == lhs {
-                return Operation::Unsupported;
-            }
-            return Operation::IndexedMemory {
-                reg: dst,
-                base: lhs,
-                offset: sign_extend(word >> 12, 9) as u64,
-                load: word & (1 << 22) != 0,
-                word: word & (1 << 30) == 0,
-                pre_index: mode == 3,
-            };
-        }
-        let offset = if matches!(word & 0xffc0_0000, 0xf900_0000 | 0xf940_0000) {
-            Some(u64::from((word >> 10) & 0xfff) * 8)
-        } else if matches!(word & 0xffe0_0c00, 0xf800_0000 | 0xf840_0000) {
-            Some(sign_extend(word >> 12, 9) as u64)
-        } else {
-            None
+    let base = reg(word >> 5, true);
+    if word & 0x3fa0_0c00 == 0x3820_0800 {
+        let extend = match (word >> 13) & 7 {
+            2 => AddressExtend::UnsignedWord,
+            6 => AddressExtend::SignedWord,
+            3 | 7 => AddressExtend::Doubleword,
+            _ => return Operation::Undefined,
         };
-        if let Some(offset) = offset {
-            return Operation::Memory {
-                reg: dst,
-                base: lhs,
-                offset,
-                load: word & (1 << 22) != 0,
-            };
-        }
-        let wide = word >> 31 != 0;
-        let offset = if matches!(word & 0x7fc0_0000, 0x3900_0000 | 0x3940_0000) {
-            Some(u64::from((word >> 10) & 0xfff) << if wide { 2 } else { 0 })
-        } else if matches!(word & 0x7fe0_0c00, 0x3800_0000 | 0x3840_0000) {
-            Some(sign_extend(word >> 12, 9) as u64)
-        } else {
-            None
+        return Operation::RegisterOffsetMemory {
+            reg: dst,
+            base,
+            index: reg(word >> 16, false),
+            extend,
+            scale: word & (1 << 12) != 0,
+            size_log2: (word >> 30) as u8,
+            load: word & (1 << 22) != 0,
         };
-        if let Some(offset) = offset {
-            let load = word & (1 << 22) != 0;
-            return if wide {
-                Operation::WordMemory {
-                    reg: dst,
-                    base: lhs,
-                    offset,
-                    load,
-                }
-            } else {
-                Operation::ByteMemory {
-                    reg: dst,
-                    base: lhs,
-                    offset,
-                    load,
-                }
-            };
-        }
     }
-    if word & 0x7f80_0000 == 0x2900_0000 && lhs != Reg::Zero {
+    let mode = (word >> 10) & 3;
+    if matches!(mode, 1 | 3) && matches!(word & 0xbfe0_0000, 0xb800_0000 | 0xb840_0000) {
+        if dst == base {
+            return Operation::Unsupported;
+        }
+        return Operation::IndexedMemory {
+            reg: dst,
+            base,
+            offset: sign_extend(word >> 12, 9) as u64,
+            load: word & (1 << 22) != 0,
+            word: word & (1 << 30) == 0,
+            pre_index: mode == 3,
+        };
+    }
+    let offset = if matches!(word & 0xffc0_0000, 0xf900_0000 | 0xf940_0000) {
+        Some(u64::from((word >> 10) & 0xfff) * 8)
+    } else if matches!(word & 0xffe0_0c00, 0xf800_0000 | 0xf840_0000) {
+        Some(sign_extend(word >> 12, 9) as u64)
+    } else {
+        None
+    };
+    if let Some(offset) = offset {
+        return Operation::Memory {
+            reg: dst,
+            base,
+            offset,
+            load: word & (1 << 22) != 0,
+        };
+    }
+    let wide = word >> 31 != 0;
+    let offset = if matches!(word & 0x7fc0_0000, 0x3900_0000 | 0x3940_0000) {
+        Some(u64::from((word >> 10) & 0xfff) << if wide { 2 } else { 0 })
+    } else if matches!(word & 0x7fe0_0c00, 0x3800_0000 | 0x3840_0000) {
+        Some(sign_extend(word >> 12, 9) as u64)
+    } else {
+        None
+    };
+    if let Some(offset) = offset {
+        let load = word & (1 << 22) != 0;
+        return if wide {
+            Operation::WordMemory {
+                reg: dst,
+                base,
+                offset,
+                load,
+            }
+        } else {
+            Operation::ByteMemory {
+                reg: dst,
+                base,
+                offset,
+                load,
+            }
+        };
+    }
+    if word & 0x7f80_0000 == 0x2900_0000 {
         let load = word & (1 << 22) != 0;
         let second = reg(word >> 10, false);
         if load && dst == second {
@@ -707,7 +706,7 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
             Operation::WordPair {
                 first: dst,
                 second,
-                base: lhs,
+                base,
                 offset: (imm * 4) as u64,
                 load,
             }
@@ -715,7 +714,7 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
             Operation::DoublePair {
                 first: dst,
                 second,
-                base: lhs,
+                base,
                 offset: (imm * 8) as u64,
                 load,
             }

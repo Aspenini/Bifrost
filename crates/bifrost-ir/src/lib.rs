@@ -273,6 +273,12 @@ pub enum Op {
         when: Option<ValueId>,
         constraint: AddressConstraint,
     },
+    /// Check a base address before applying an instruction's memory offset.
+    CheckMemoryAlignment {
+        address: ValueId,
+        alignment: u8,
+        access: MemoryAccess,
+    },
     ReadRegister {
         out: ValueId,
         register: Register,

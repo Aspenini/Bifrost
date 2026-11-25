@@ -2,7 +2,7 @@ use super::{InterpreterError, Local, Locals, data, guarded_address, value::Value
 use bifrost_core::{
     AccessKind, FaultClass, GuestAddress, GuestFault, GuestMemory, GuestThread, MemoryError,
 };
-use bifrost_ir::{AddressConstraint, Endian, MemoryLayout, Op, Type};
+use bifrost_ir::{AddressConstraint, Endian, MemoryAccess, MemoryLayout, Op, Type};
 
 pub(crate) enum EvalError {
     Guest(GuestFault),
@@ -83,6 +83,21 @@ pub(crate) fn instruction(
                         AccessKind::Execute,
                     ));
                 }
+            }
+            return Ok(());
+        }
+        Op::CheckMemoryAlignment {
+            address,
+            alignment,
+            access,
+        } => {
+            let address = GuestAddress(data(locals, address).bits as u64);
+            if !address.0.is_multiple_of(u64::from(alignment)) {
+                let access = match access {
+                    MemoryAccess::Read => AccessKind::Read,
+                    MemoryAccess::Write => AccessKind::Write,
+                };
+                return Err(fault(pc, thread, FaultClass::Alignment, address, access));
             }
             return Ok(());
         }

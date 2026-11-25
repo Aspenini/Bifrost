@@ -58,7 +58,15 @@ fn distinguishes_sp_and_zero_and_sign_extends_branch_targets() {
 #[test]
 fn rejects_other_forms_and_unaligned_fetches() {
     assert_eq!(op(0x8b01_0400), Operation::Unsupported); // add x0,x0,x1,lsl #1
-    assert_eq!(op(0xf940_03e0), Operation::Unsupported); // ldr x0,[sp]
+    assert_eq!(
+        op(0xf940_03e0),
+        Operation::Memory {
+            reg: Reg::X(0),
+            base: Reg::Sp,
+            offset: 0,
+            load: true
+        }
+    ); // ldr x0,[sp]
     assert_eq!(op(0xd400_0002), Operation::Unsupported); // hvc #0
     assert_eq!(op(0x0000_1234), Operation::Undefined);
     assert_eq!(op(0xd503_3bbf), Operation::Fence);

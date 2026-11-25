@@ -582,6 +582,62 @@ fn register_pairs_transfer_contiguous_values_and_guard_the_whole_span() {
     check_register_pair([0xa93f_8820, 0xa97f_9023], 8); // stp/ldp with X registers and #-8
 }
 
+#[test]
+fn stack_relative_memory_checks_sp_alignment_before_access() {
+    for (code, sp, expected_access) in [
+        (&[0xa901_0be0, 0xa941_13e3][..], DATA, None), // stp/ldp [sp,#16]
+        (
+            &[0xa901_0be0][..],
+            Addr(DATA.0 + 8),
+            Some(AccessKind::Write),
+        ),
+        (&[0xf940_07e3][..], Addr(DATA.0 + 8), Some(AccessKind::Read)), // ldr [sp,#8]
+    ] {
+        let (mut memory, mut thread) = memory_and_thread(code, Protection::ReadWrite);
+        let CpuState::AArch64(cpu) = &mut thread.cpu else {
+            unreachable!()
+        };
+        cpu.sp = sp;
+        cpu.x[0] = 42;
+        cpu.x[2] = 43;
+        let original = thread.clone();
+        let budget = ExecutionBudget {
+            instructions: code.len() as u64,
+        };
+        let exit = RawInterpreter::new(&target(), &mut memory, &mut ())
+            .unwrap()
+            .run(&mut thread, budget)
+            .unwrap();
+        if let Some(access) = expected_access {
+            let ExitReason::Fault(fault) = exit else {
+                panic!("expected stack-pointer alignment fault")
+            };
+            assert_eq!(fault.class, FaultClass::Alignment);
+            assert_eq!(fault.memory_access, Some((sp, access)));
+            assert_eq!(thread.cpu, original.cpu);
+        } else {
+            assert_eq!(exit, ExitReason::BudgetExhausted);
+            assert_eq!(state(&thread).x[3..5], [42, 43]);
+        }
+        #[cfg(all(
+            feature = "jit-cranelift",
+            any(target_arch = "x86_64", target_arch = "aarch64"),
+            any(target_os = "linux", target_os = "windows")
+        ))]
+        {
+            use bifrost_runtime::raw::{RawJit, SystemJitMemory};
+            memory.write(Addr(DATA.0 + 16), &[0; 16]).unwrap();
+            let mut jitted = original;
+            let actual = RawJit::new(&target(), &mut memory, &mut (), SystemJitMemory)
+                .unwrap()
+                .run(&mut jitted, budget)
+                .unwrap();
+            assert_eq!(actual, exit);
+            assert_eq!(jitted, thread);
+        }
+    }
+}
+
 fn check_register_pair(code: [u32; 2], width: usize) {
     let first: u64 = 0xdead_beef_1122_3344;
     let second: u64 = 0xdead_beef_aabb_ccdd;
