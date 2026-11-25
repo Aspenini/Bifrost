@@ -55,6 +55,14 @@ pub enum Bitfield {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ConditionalElse {
+    Keep,
+    Increment,
+    Invert,
+    Negate,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AddressExtend {
     UnsignedWord,
     SignedWord,
@@ -231,6 +239,22 @@ pub enum Operation {
         reg: Reg,
         bit: u8,
         nonzero: bool,
+    },
+    ConditionalSelect {
+        dst: Reg,
+        lhs: Reg,
+        rhs: Reg,
+        condition: u8,
+        otherwise: ConditionalElse,
+        word: bool,
+    },
+    ConditionalCompare {
+        lhs: Reg,
+        rhs: Operand,
+        condition: u8,
+        fallback: u8,
+        sub: bool,
+        word: bool,
     },
     Return(Reg),
     BranchRegister {
@@ -633,6 +657,37 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
             sub: word & (1 << 30) != 0,
             flags: word & (1 << 29) != 0,
             word: narrow,
+        };
+    }
+    if word & 0x3fe0_0410 == 0x3a40_0000 {
+        let rhs = if word & (1 << 11) == 0 {
+            Operand::Register(reg(word >> 16, false))
+        } else {
+            Operand::Immediate(u64::from((word >> 16) & 31))
+        };
+        return Operation::ConditionalCompare {
+            lhs,
+            rhs,
+            condition: ((word >> 12) & 15) as u8,
+            fallback: (word & 15) as u8,
+            sub: word & (1 << 30) != 0,
+            word: word >> 31 == 0,
+        };
+    }
+    if word & 0x3fe0_0800 == 0x1a80_0000 {
+        let otherwise = match (word & (1 << 30) != 0, word & (1 << 10) != 0) {
+            (false, false) => ConditionalElse::Keep,
+            (false, true) => ConditionalElse::Increment,
+            (true, false) => ConditionalElse::Invert,
+            (true, true) => ConditionalElse::Negate,
+        };
+        return Operation::ConditionalSelect {
+            dst,
+            lhs,
+            rhs: reg(word >> 16, false),
+            condition: ((word >> 12) & 15) as u8,
+            otherwise,
+            word: word >> 31 == 0,
         };
     }
     if word & 0x7fe0_f000 == 0x1ac0_2000 {

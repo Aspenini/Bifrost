@@ -359,6 +359,15 @@ fn scalar_arithmetic_and_logic_use_the_correct_width_and_flags() {
         (0x1ac2_2420, 0x8000_0000, 33, 0x4000_0000, NZCV), // lsr w0,w1,w2
         (0x1ac2_2820, 0x8000_0000, 33, 0xc000_0000, NZCV), // asr w0,w1,w2
         (0x1ac2_2c20, 1, 33, 0x8000_0000, NZCV), // ror w0,w1,w2
+        (0x1a82_0020, 5, 7, 7, NZCV),           // csel w0,w1,w2,eq
+        (0x1a82_1020, 5, 7, 5, NZCV),           // csel w0,w1,w2,ne
+        (0x1a82_0420, 5, 0xffff_ffff, 0, NZCV), // csinc w0,w1,w2,eq
+        (0xda82_0020, 5, 7, 0xedcb_5432_ffff_fff8, NZCV), // csinv x0,x1,x2,eq
+        (0x5a82_0420, 5, 2, 0xffff_fffe, NZCV), // csneg w0,w1,w2,eq
+        (0xfa51_1824, 1, 0, u64::MAX, NZCV),    // ccmp x1,#17,#4,ne
+        (0x7a42_0023, 1, 1, u64::MAX, 0x3000_0000), // ccmp w1,w2,#3,eq (fallback)
+        (0x3a41_1825, 0xffff_ffff, 0, u64::MAX, 0x6000_0000), // ccmn w1,#1,#5,ne
+        (0xba42_0028, 0, 0, u64::MAX, 0x8000_0000), // ccmn x1,x2,#8,eq (fallback)
         (0x5318_5c20, 0x1234_5678, 0, 0x3456_7800, NZCV), // lsl w0,w1,#8
         (0x1304_7c20, 0x8123_4567, 0, 0xf812_3456, NZCV), // asr w0,w1,#4
         (0x9340_1c20, 0x80, 0, u64::MAX - 127, NZCV), // sxtb x0,w1

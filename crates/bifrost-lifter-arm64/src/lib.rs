@@ -5,8 +5,8 @@ use bifrost_core::{
     GuestOs, GuestTarget, TargetError,
 };
 use bifrost_decoder_arm64::{
-    AddressExtend, Bitfield, DecodeError, DecodedInstruction, Logical, Operand, Operation, Reg,
-    RegisterShift, fetch,
+    AddressExtend, Bitfield, ConditionalElse, DecodeError, DecodedInstruction, Logical, Operand,
+    Operation, Reg, RegisterShift, fetch,
 };
 use bifrost_ir::*;
 use std::fmt;
@@ -469,6 +469,61 @@ impl Arm64Lifter {
                 }
                 ir.next(next)
             }
+            Operation::ConditionalCompare {
+                lhs,
+                rhs,
+                condition,
+                fallback,
+                sub,
+                word,
+            } => {
+                let lhs = ir.read(lhs);
+                let rhs = ir.operand(rhs);
+                let (lhs, rhs, result) = ir.arithmetic_values(lhs, rhs, sub, word);
+                let yes = ir.arithmetic_flags(lhs, rhs, result, sub, if word { 0 } else { 32 });
+                let no = ir.integer(u64::from(fallback) << 28);
+                let condition = ir.condition(condition);
+                let flags = ir.value(|out| Op::Select {
+                    out,
+                    condition,
+                    yes,
+                    no,
+                });
+                ir.write_flags(flags);
+                ir.next(next)
+            }
+            Operation::ConditionalSelect {
+                dst,
+                lhs,
+                rhs,
+                condition,
+                otherwise,
+                word,
+            } => {
+                let yes = ir.read(lhs);
+                let rhs = ir.read(rhs);
+                let no = match otherwise {
+                    ConditionalElse::Keep => rhs,
+                    ConditionalElse::Increment => ir.with_immediate(IntOp::Add, rhs, 1),
+                    ConditionalElse::Invert => ir.with_immediate(IntOp::Xor, rhs, u64::MAX),
+                    ConditionalElse::Negate => {
+                        let zero = ir.integer(0);
+                        ir.binary(IntOp::Sub, zero, rhs)
+                    }
+                };
+                let condition = ir.condition(condition);
+                let mut result = ir.value(|out| Op::Select {
+                    out,
+                    condition,
+                    yes,
+                    no,
+                });
+                if word {
+                    result = ir.with_immediate(IntOp::And, result, u64::from(u32::MAX));
+                }
+                ir.write(dst, result);
+                ir.next(next)
+            }
             Operation::Branch { target, link } => {
                 if link {
                     let lr = ir.integer(next.0);
@@ -744,12 +799,27 @@ impl Builder {
     fn arithmetic(
         &mut self,
         dst: Reg,
-        mut lhs: ValueId,
-        mut rhs: ValueId,
+        lhs: ValueId,
+        rhs: ValueId,
         sub: bool,
         flags: bool,
         word: bool,
     ) {
+        let (lhs, rhs, result) = self.arithmetic_values(lhs, rhs, sub, word);
+        if flags {
+            let flags = self.arithmetic_flags(lhs, rhs, result, sub, if word { 0 } else { 32 });
+            self.write_flags(flags);
+        }
+        self.write(dst, result);
+    }
+
+    fn arithmetic_values(
+        &mut self,
+        mut lhs: ValueId,
+        mut rhs: ValueId,
+        sub: bool,
+        word: bool,
+    ) -> (ValueId, ValueId, ValueId) {
         if word {
             lhs = self.with_immediate(IntOp::And, lhs, u64::from(u32::MAX));
             rhs = self.with_immediate(IntOp::And, rhs, u64::from(u32::MAX));
@@ -758,10 +828,7 @@ impl Builder {
         if word {
             result = self.with_immediate(IntOp::And, result, u64::from(u32::MAX));
         }
-        if flags {
-            self.flags(lhs, rhs, result, sub, if word { 0 } else { 32 });
-        }
-        self.write(dst, result);
+        (lhs, rhs, result)
     }
 
     fn access_scalar(&mut self, reg: Reg, address: ValueId, ty: Type, load: bool) {
@@ -849,7 +916,14 @@ impl Builder {
         self.binary(IntOp::Or, n, z)
     }
 
-    fn flags(&mut self, lhs: ValueId, rhs: ValueId, result: ValueId, sub: bool, sign_shift: u64) {
+    fn arithmetic_flags(
+        &mut self,
+        lhs: ValueId,
+        rhs: ValueId,
+        result: ValueId,
+        sub: bool,
+        sign_shift: u64,
+    ) -> ValueId {
         let nz = self.nz_flags(result, sign_shift);
         let zero = self.integer(0);
         let carry = if sub {
@@ -863,8 +937,7 @@ impl Builder {
         let overflow = self.binary(IntOp::And, sign_change, affected);
         let v = self.shifted_mask(overflow, sign_shift + 3, 1 << 28);
         let cv = self.binary(IntOp::Or, c, v);
-        let flags = self.binary(IntOp::Or, nz, cv);
-        self.write_flags(flags);
+        self.binary(IntOp::Or, nz, cv)
     }
 
     fn write_flags(&mut self, flags: ValueId) {

@@ -12,6 +12,8 @@ The raw profile uses little-endian A64 instructions and serialized execution ove
 | Bitfield | 32-bit and 64-bit BFM, SBFM and UBFM, including immediate shift and sign-extension aliases |
 | Bit operations | 32-bit and 64-bit RBIT, CLZ, and CLS |
 | Variable shifts | 32-bit and 64-bit LSLV, LSRV, ASRV and RORV |
+| Conditional select | 32-bit and 64-bit CSEL, CSINC, CSINV and CSNEG |
+| Conditional compare | 32-bit and 64-bit CCMP and CCMN with a register or immediate |
 | Memory | 32-bit and 64-bit unsigned scaled immediate and signed pre/post-indexed LDR/STR, signed unscaled immediate LDUR/STUR, unsigned immediate LDRB/STRB, and signed unscaled immediate LDURB/STURB with Xn or SP base |
 | Register-offset memory | Unsigned byte, halfword, word and doubleword loads and stores with Xn or SP base and UXTW, SXTW, SXTX or LSL offset |
 | Paired memory | 32-bit and 64-bit signed-offset LDP/STP with Xn or SP base, distinct LDP destinations, and no writeback |
