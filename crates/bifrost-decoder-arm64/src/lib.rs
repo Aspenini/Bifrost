@@ -206,6 +206,12 @@ pub enum Operation {
         offset: u64,
         load: bool,
     },
+    HalfwordMemory {
+        reg: Reg,
+        base: Reg,
+        offset: u64,
+        load: bool,
+    },
     WordMemory {
         reg: Reg,
         base: Reg,
@@ -812,45 +818,41 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
             pre_index: mode == 3,
         };
     }
-    let offset = if matches!(word & 0xffc0_0000, 0xf900_0000 | 0xf940_0000) {
-        Some(u64::from((word >> 10) & 0xfff) * 8)
-    } else if matches!(word & 0xffe0_0c00, 0xf800_0000 | 0xf840_0000) {
-        Some(sign_extend(word >> 12, 9) as u64)
-    } else {
-        None
-    };
-    if let Some(offset) = offset {
-        return Operation::Memory {
-            reg: dst,
-            base,
-            offset,
-            load: word & (1 << 22) != 0,
-        };
-    }
-    let wide = word >> 31 != 0;
-    let offset = if matches!(word & 0x7fc0_0000, 0x3900_0000 | 0x3940_0000) {
-        Some(u64::from((word >> 10) & 0xfff) << if wide { 2 } else { 0 })
-    } else if matches!(word & 0x7fe0_0c00, 0x3800_0000 | 0x3840_0000) {
+    let size_log2 = word >> 30;
+    let offset = if word & 0x3f80_0000 == 0x3900_0000 {
+        Some(u64::from((word >> 10) & 0xfff) << size_log2)
+    } else if word & 0x3fa0_0c00 == 0x3800_0000 {
         Some(sign_extend(word >> 12, 9) as u64)
     } else {
         None
     };
     if let Some(offset) = offset {
         let load = word & (1 << 22) != 0;
-        return if wide {
-            Operation::WordMemory {
+        return match size_log2 {
+            0 => Operation::ByteMemory {
                 reg: dst,
                 base,
                 offset,
                 load,
-            }
-        } else {
-            Operation::ByteMemory {
+            },
+            1 => Operation::HalfwordMemory {
                 reg: dst,
                 base,
                 offset,
                 load,
-            }
+            },
+            2 => Operation::WordMemory {
+                reg: dst,
+                base,
+                offset,
+                load,
+            },
+            _ => Operation::Memory {
+                reg: dst,
+                base,
+                offset,
+                load,
+            },
         };
     }
     if word & 0x7e00_0000 == 0x2800_0000 {

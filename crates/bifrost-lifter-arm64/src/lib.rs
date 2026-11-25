@@ -366,6 +366,12 @@ impl Arm64Lifter {
                 offset,
                 load,
             }
+            | Operation::HalfwordMemory {
+                reg,
+                base,
+                offset,
+                load,
+            }
             | Operation::WordMemory {
                 reg,
                 base,
@@ -374,6 +380,7 @@ impl Arm64Lifter {
             } => {
                 let ty = match instruction.operation() {
                     Operation::ByteMemory { .. } => Type::I8,
+                    Operation::HalfwordMemory { .. } => Type::I16,
                     Operation::WordMemory { .. } => Type::I32,
                     _ => Type::I64,
                 };

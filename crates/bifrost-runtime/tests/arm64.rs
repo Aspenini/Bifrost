@@ -281,6 +281,8 @@ fn pointer_authentication_exits_before_modifying_guest_registers() {
 fn scalar_memory_access_preserves_adjacent_bytes_and_zero_extends_loads() {
     check_memory_access([0x3900_0420, 0x3940_0422], DATA.0, 1, &[0xab]); // strb/ldrb [x1,#1]
     check_memory_access([0x381f_f020, 0x385f_f022], DATA.0 + 2, 1, &[0xab]); // sturb/ldurb [x1,#-1]
+    check_memory_access([0x7900_0420, 0x7940_0422], DATA.0, 2, &[0xab, 0xef]); // strh/ldrh [x1,#2]
+    check_memory_access([0x781f_f020, 0x785f_f022], DATA.0 + 2, 1, &[0xab, 0xef]); // sturh/ldurh [x1,#-1]
     check_memory_access(
         [0xb900_0420, 0xb940_0422],
         DATA.0,
