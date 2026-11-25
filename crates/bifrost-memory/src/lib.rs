@@ -56,6 +56,15 @@ pub struct AddressSpace {
     generation: u64,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MemoryRegion {
+    pub start: GuestAddress,
+    /// Exclusive end. `None` denotes the end of the 64-bit address space.
+    pub end: Option<GuestAddress>,
+    /// `None` denotes an unmapped region, distinct from a mapped guard or no-access page.
+    pub protection: Option<Protection>,
+}
+
 impl AddressSpace {
     pub fn new(page_size: usize, max_pages: usize) -> Result<Self, MemoryError> {
         if !page_size.is_power_of_two() {
@@ -89,6 +98,50 @@ impl AddressSpace {
         self.pages
             .get(&self.page_base(address.0))
             .map(|page| page.generation)
+    }
+
+    /// Returns the maximal contiguous interval with the page's current protection.
+    pub fn region_at(&self, address: GuestAddress) -> MemoryRegion {
+        use std::ops::Bound::{Excluded, Unbounded};
+
+        let base = self.page_base(address.0);
+        let width = self.page_size as u64;
+        let Some(page) = self.pages.get(&base) else {
+            let start = self
+                .pages
+                .range(..base)
+                .next_back()
+                .map_or(0, |(&key, _)| key + width);
+            let end = self
+                .pages
+                .range(base..)
+                .next()
+                .map(|(&key, _)| GuestAddress(key));
+            return MemoryRegion {
+                start: GuestAddress(start),
+                end,
+                protection: None,
+            };
+        };
+        let mut start = base;
+        for (&key, previous) in self.pages.range(..base).rev() {
+            if key.checked_add(width) != Some(start) || previous.protection != page.protection {
+                break;
+            }
+            start = key;
+        }
+        let mut end = base.checked_add(width);
+        for (&key, next) in self.pages.range((Excluded(base), Unbounded)) {
+            if end != Some(key) || next.protection != page.protection {
+                break;
+            }
+            end = key.checked_add(width);
+        }
+        MemoryRegion {
+            start: GuestAddress(start),
+            end: end.map(GuestAddress),
+            protection: Some(page.protection),
+        }
     }
 
     pub fn map(

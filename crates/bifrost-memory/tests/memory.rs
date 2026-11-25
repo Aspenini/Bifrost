@@ -1,5 +1,50 @@
 use bifrost_core::{AccessKind, GuestAddress as Addr};
-use bifrost_memory::{AddressSpace, GuestMemory, GuestMemoryRead, MemoryError, Protection};
+use bifrost_memory::{
+    AddressSpace, GuestMemory, GuestMemoryRead, MemoryError, MemoryRegion, Protection,
+};
+
+#[test]
+fn region_queries_follow_current_protection_and_unmapped_gaps() {
+    let mut memory = AddressSpace::new(4096, 4).unwrap();
+    memory
+        .map(Addr(0x1000), 8192, Protection::ReadWrite)
+        .unwrap();
+    memory.map(Addr(0x4000), 4096, Protection::Guard).unwrap();
+    let last_page = Addr(u64::MAX - 4095);
+    memory.map(last_page, 4096, Protection::Read).unwrap();
+    assert_eq!(
+        memory.region_at(Addr(0x2010)),
+        MemoryRegion {
+            start: Addr(0x1000),
+            end: Some(Addr(0x3000)),
+            protection: Some(Protection::ReadWrite)
+        }
+    );
+    memory
+        .protect(Addr(0x1000), 4096, Protection::Read)
+        .unwrap();
+    assert_eq!(memory.region_at(Addr(0x2010)).start, Addr(0x2000));
+    assert_eq!(
+        memory.region_at(Addr(0x3010)),
+        MemoryRegion {
+            start: Addr(0x3000),
+            end: Some(Addr(0x4000)),
+            protection: None
+        }
+    );
+    assert_eq!(
+        memory.region_at(Addr(0x4000)).protection,
+        Some(Protection::Guard)
+    );
+    assert_eq!(
+        memory.region_at(Addr(u64::MAX)),
+        MemoryRegion {
+            start: last_page,
+            end: None,
+            protection: Some(Protection::Read)
+        }
+    );
+}
 
 #[test]
 fn guarded_stack_mapping_is_atomic() {
