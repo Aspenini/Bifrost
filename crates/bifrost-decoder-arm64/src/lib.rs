@@ -129,6 +129,13 @@ pub enum Operation {
         accumulator: Reg,
         sub: bool,
         word: bool,
+        extend: AddressExtend,
+    },
+    MultiplyHigh {
+        dst: Reg,
+        lhs: Reg,
+        rhs: Reg,
+        signed: bool,
     },
     LogicalImmediate {
         kind: Logical,
@@ -708,7 +715,21 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
             word: word >> 31 == 0,
         };
     }
-    if word & 0x7fe0_0000 == 0x1b00_0000 {
+    if let kind @ (0x9b40_7c00 | 0x9bc0_7c00) = word & 0xffe0_fc00 {
+        return Operation::MultiplyHigh {
+            dst,
+            lhs,
+            rhs: reg(word >> 16, false),
+            signed: kind == 0x9b40_7c00,
+        };
+    }
+    let multiply_extend = match word & 0xffe0_0000 {
+        0x1b00_0000 | 0x9b00_0000 => Some(AddressExtend::Doubleword),
+        0x9ba0_0000 => Some(AddressExtend::UnsignedWord),
+        0x9b20_0000 => Some(AddressExtend::SignedWord),
+        _ => None,
+    };
+    if let Some(extend) = multiply_extend {
         return Operation::MultiplyAccumulate {
             dst,
             lhs,
@@ -716,6 +737,7 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
             accumulator: reg(word >> 10, false),
             sub: word & (1 << 15) != 0,
             word: word >> 31 == 0,
+            extend,
         };
     }
     let base = reg(word >> 5, true);

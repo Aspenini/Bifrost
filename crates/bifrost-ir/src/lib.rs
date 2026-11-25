@@ -141,6 +141,8 @@ pub enum IntOp {
     Add,
     Sub,
     Mul,
+    MulHighUnsigned,
+    MulHighSigned,
     And,
     Or,
     Xor,

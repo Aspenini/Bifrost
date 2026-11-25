@@ -40,6 +40,12 @@ impl Value {
             IntOp::Add => lhs.wrapping_add(rhs),
             IntOp::Sub => lhs.wrapping_sub(rhs),
             IntOp::Mul => lhs.wrapping_mul(rhs),
+            IntOp::MulHighUnsigned => (lhs * rhs) >> 64,
+            IntOp::MulHighSigned => {
+                let lhs = i128::from(lhs as i64);
+                let rhs = i128::from(rhs as i64);
+                ((lhs * rhs) >> 64) as u128
+            }
             IntOp::And => lhs & rhs,
             IntOp::Or => lhs | rhs,
             IntOp::Xor => lhs ^ rhs,

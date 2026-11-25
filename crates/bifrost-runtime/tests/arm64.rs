@@ -343,6 +343,10 @@ fn scalar_arithmetic_and_logic_use_the_correct_width_and_flags() {
         (0x1b02_fc20, 2, 3, 0xffff_fffa, NZCV), // mneg w0,w1,w2
         (0x9b02_0c20, 2, 3, 0x27d0_8e36_0000_000d, NZCV), // madd x0,x1,x2,x3
         (0x9b02_8c20, 2, 3, 0xd82f_71ca_0000_0001, NZCV), // msub x0,x1,x2,x3
+        (0x9bc2_7c20, u64::MAX, 2, 0x1234_abcd_0000_0001, NZCV), // umulh x0,x1,x2
+        (0x9b42_7c20, u64::MAX, 2, u64::MAX, NZCV), // smulh x0,x1,x2
+        (0x9ba2_0c20, u32::MAX.into(), 2, 0x2_0000_0005, NZCV), // umaddl x0,w1,w2,x3
+        (0x9b22_8c20, u32::MAX.into(), 2, 9, NZCV), // smsubl x0,w1,w2,x3
         (0xaa02_8020, 3, 1, 0xabcd_1235_0000_0003, NZCV), // orr x0,x1,x2,lsl #32
         (0x2a82_07e0, 0, 0x8000_0000, 0xc000_0000, NZCV), // orr w0,wzr,w2,asr #1
         (0x4ac2_0420, 2, 1, 0x8000_0002, NZCV), // eor w0,w1,w2,ror #1

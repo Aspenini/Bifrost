@@ -290,9 +290,12 @@ impl Arm64Lifter {
                 accumulator,
                 sub,
                 word,
+                extend,
             } => {
                 let lhs = ir.read(lhs);
                 let rhs = ir.read(rhs);
+                let lhs = ir.extend_word(lhs, extend);
+                let rhs = ir.extend_word(rhs, extend);
                 let accumulator = ir.read(accumulator);
                 let product = ir.binary(IntOp::Mul, lhs, rhs);
                 let mut result = ir.binary(
@@ -303,6 +306,23 @@ impl Arm64Lifter {
                 if word {
                     result = ir.with_immediate(IntOp::And, result, u64::from(u32::MAX));
                 }
+                ir.write(dst, result);
+                ir.next(next)
+            }
+            Operation::MultiplyHigh {
+                dst,
+                lhs,
+                rhs,
+                signed,
+            } => {
+                let lhs = ir.read(lhs);
+                let rhs = ir.read(rhs);
+                let op = if signed {
+                    IntOp::MulHighSigned
+                } else {
+                    IntOp::MulHighUnsigned
+                };
+                let result = ir.binary(op, lhs, rhs);
                 ir.write(dst, result);
                 ir.next(next)
             }
@@ -364,16 +384,7 @@ impl Arm64Lifter {
             } => {
                 let base = ir.memory_base(base, load);
                 let index = ir.read(index);
-                let index = match extend {
-                    AddressExtend::UnsignedWord => {
-                        ir.with_immediate(IntOp::And, index, u64::from(u32::MAX))
-                    }
-                    AddressExtend::SignedWord => {
-                        let low = ir.shift_register(index, RegisterShift::Left, 32, false);
-                        ir.shift_register(low, RegisterShift::ArithmeticRight, 32, false)
-                    }
-                    AddressExtend::Doubleword => index,
-                };
+                let index = ir.extend_word(index, extend);
                 let offset = ir.shift_register(
                     index,
                     RegisterShift::Left,
@@ -875,6 +886,19 @@ impl Builder {
                 value,
                 layout,
             });
+        }
+    }
+
+    fn extend_word(&mut self, value: ValueId, extend: AddressExtend) -> ValueId {
+        match extend {
+            AddressExtend::UnsignedWord => {
+                self.with_immediate(IntOp::And, value, u64::from(u32::MAX))
+            }
+            AddressExtend::SignedWord => {
+                let low = self.shift_register(value, RegisterShift::Left, 32, false);
+                self.shift_register(low, RegisterShift::ArithmeticRight, 32, false)
+            }
+            AddressExtend::Doubleword => value,
         }
     }
 

@@ -1,6 +1,6 @@
 use crate::{
-    BlockId, Edge, Exit, IrBlock, IrFunction, MemoryAccess, MemoryLayout, Op, Register, Type,
-    ValueId,
+    BlockId, Edge, Exit, IntOp, IrBlock, IrFunction, MemoryAccess, MemoryLayout, Op, Register,
+    Type, ValueId,
 };
 use bifrost_core::{CpuFeature, GuestAddress, GuestTarget};
 use std::collections::{BTreeMap, BTreeSet};
@@ -286,8 +286,11 @@ impl Values {
                 }
                 (out, ty)
             }
-            Op::Int { out, lhs, rhs, .. } => {
+            Op::Int { out, op, lhs, rhs } => {
                 let ty = self.integer(lhs)?;
+                if matches!(op, IntOp::MulHighUnsigned | IntOp::MulHighSigned) {
+                    self.expect(lhs, Type::I64)?;
+                }
                 self.expect(rhs, ty)?;
                 (out, ty)
             }

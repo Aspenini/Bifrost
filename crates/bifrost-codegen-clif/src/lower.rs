@@ -134,6 +134,8 @@ impl Lowering<'_> {
                     IntOp::Add => ins.iadd(lhs.value, rhs),
                     IntOp::Sub => ins.isub(lhs.value, rhs),
                     IntOp::Mul => ins.imul(lhs.value, rhs),
+                    IntOp::MulHighUnsigned => ins.umulhi(lhs.value, rhs),
+                    IntOp::MulHighSigned => ins.smulhi(lhs.value, rhs),
                     IntOp::And => ins.band(lhs.value, rhs),
                     IntOp::Or => ins.bor(lhs.value, rhs),
                     IntOp::Xor => ins.bxor(lhs.value, rhs),
