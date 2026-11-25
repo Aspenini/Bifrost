@@ -115,6 +115,7 @@ pub enum MemoryError {
     AddressOverflow(GuestAddress),
     Unmapped(GuestAddress),
     AlreadyMapped(GuestAddress),
+    InvalidPageLoan(GuestAddress),
     Denied {
         address: GuestAddress,
         access: AccessKind,
@@ -138,6 +139,9 @@ impl fmt::Display for MemoryError {
             Self::Unmapped(address) => write!(f, "unmapped guest address {:#x}", address.0),
             Self::AlreadyMapped(address) => {
                 write!(f, "guest page at {:#x} is already mapped", address.0)
+            }
+            Self::InvalidPageLoan(address) => {
+                write!(f, "invalid guest page loan at {:#x}", address.0)
             }
             Self::Denied {
                 address,

@@ -29,6 +29,13 @@ struct Page {
     bytes: Vec<u8>,
     protection: Protection,
     generation: u64,
+    loan: Option<PageLoan>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PageLoan {
+    Source,
+    Destination { source: GuestAddress },
 }
 
 /// Software-enforced guest pages. Memory is zero-filled on mapping and owned by this instance.
@@ -53,6 +60,7 @@ pub struct AddressSpace {
     page_size: usize,
     max_pages: usize,
     pages: BTreeMap<u64, Page>,
+    loaned_pages: usize,
     generation: u64,
 }
 
@@ -81,6 +89,7 @@ impl AddressSpace {
             page_size,
             max_pages,
             pages: BTreeMap::new(),
+            loaned_pages: 0,
             generation: 0,
         })
     }
@@ -89,9 +98,9 @@ impl AddressSpace {
         self.page_size
     }
 
-    /// The number of pages currently mapped, including guard pages.
+    /// The number of pages with backing storage, including guard pages.
     pub fn mapped_pages(&self) -> usize {
-        self.pages.len()
+        self.pages.len() - self.loaned_pages
     }
 
     pub const fn page_capacity(&self) -> usize {
@@ -107,6 +116,10 @@ impl AddressSpace {
         self.pages
             .get(&self.page_base(address.0))
             .map(|page| page.generation)
+    }
+
+    pub fn page_loan_at(&self, address: GuestAddress) -> Option<PageLoan> {
+        self.pages.get(&self.page_base(address.0))?.loan
     }
 
     /// Returns the maximal contiguous interval with the page's current protection.
@@ -132,16 +145,21 @@ impl AddressSpace {
                 protection: None,
             };
         };
+        let same_mapping = |other: &Page| {
+            other.protection == page.protection
+                && other.loan.as_ref().map(std::mem::discriminant)
+                    == page.loan.as_ref().map(std::mem::discriminant)
+        };
         let mut start = base;
         for (&key, previous) in self.pages.range(..base).rev() {
-            if key.checked_add(width) != Some(start) || previous.protection != page.protection {
+            if key.checked_add(width) != Some(start) || !same_mapping(previous) {
                 break;
             }
             start = key;
         }
         let mut end = base.checked_add(width);
         for (&key, next) in self.pages.range((Excluded(base), Unbounded)) {
-            if end != Some(key) || next.protection != page.protection {
+            if end != Some(key) || !same_mapping(next) {
                 break;
             }
             end = key.checked_add(width);
@@ -200,7 +218,7 @@ impl AddressSpace {
         let bases = self.region(start, len)?;
         let count =
             usize::try_from(len / self.page_size as u64).map_err(|_| MemoryError::PageLimit)?;
-        if count > self.max_pages - self.pages.len() {
+        if count > self.max_pages - self.mapped_pages() {
             return Err(MemoryError::PageLimit);
         }
         for base in bases.clone() {
@@ -225,10 +243,91 @@ impl AddressSpace {
                     bytes,
                     protection: protection(base),
                     generation,
+                    loan: None,
                 },
             ));
         }
         self.pages.extend(staged);
+        self.generation = generation;
+        Ok(())
+    }
+
+    /// Move the backing of read-write pages to a vacant range, reserving the
+    /// source addresses with no access until the pages are returned.
+    pub fn lend_pages(
+        &mut self,
+        source: GuestAddress,
+        destination: GuestAddress,
+        len: u64,
+    ) -> Result<(), MemoryError> {
+        let pairs = self
+            .region(source, len)?
+            .zip(self.region(destination, len)?);
+        for (from, to) in pairs.clone() {
+            let page = self
+                .pages
+                .get(&from)
+                .ok_or(MemoryError::Unmapped(GuestAddress(from)))?;
+            if page.protection != Protection::ReadWrite || page.loan.is_some() {
+                return Err(MemoryError::InvalidPageLoan(GuestAddress(from)));
+            }
+            if self.pages.contains_key(&to) {
+                return Err(MemoryError::AlreadyMapped(GuestAddress(to)));
+            }
+        }
+        let generation = self.next_generation()?;
+        for (from, to) in pairs {
+            let source = self.pages.get_mut(&from).expect("validated source page");
+            let bytes = std::mem::take(&mut source.bytes);
+            source.protection = Protection::None;
+            source.loan = Some(PageLoan::Source);
+            source.generation = generation;
+            self.pages.insert(
+                to,
+                Page {
+                    bytes,
+                    protection: Protection::ReadWrite,
+                    generation,
+                    loan: Some(PageLoan::Destination {
+                        source: GuestAddress(from),
+                    }),
+                },
+            );
+            self.loaned_pages += 1;
+        }
+        self.generation = generation;
+        Ok(())
+    }
+
+    /// Return any page-aligned subrange to its original addresses.
+    pub fn return_pages(
+        &mut self,
+        source: GuestAddress,
+        destination: GuestAddress,
+        len: u64,
+    ) -> Result<(), MemoryError> {
+        let pairs = self
+            .region(source, len)?
+            .zip(self.region(destination, len)?);
+        for (from, to) in pairs.clone() {
+            let expected = PageLoan::Destination {
+                source: GuestAddress(from),
+            };
+            if self.page_loan_at(GuestAddress(to)) != Some(expected) {
+                return Err(MemoryError::InvalidPageLoan(GuestAddress(to)));
+            }
+        }
+        let generation = self.next_generation()?;
+        for (from, to) in pairs {
+            let destination = self.pages.remove(&to).expect("validated destination page");
+            let source = self.pages.get_mut(&from).expect("reserved source page");
+            *source = Page {
+                generation,
+                loan: None,
+                ..destination
+            };
+            self.loaned_pages -= 1;
+        }
         self.generation = generation;
         Ok(())
     }
@@ -282,8 +381,12 @@ impl AddressSpace {
 
     fn check_mapped(&self, bases: impl Iterator<Item = u64>) -> Result<(), MemoryError> {
         for base in bases {
-            if !self.pages.contains_key(&base) {
-                return Err(MemoryError::Unmapped(GuestAddress(base)));
+            let page = self
+                .pages
+                .get(&base)
+                .ok_or(MemoryError::Unmapped(GuestAddress(base)))?;
+            if page.loan.is_some() {
+                return Err(MemoryError::InvalidPageLoan(GuestAddress(base)));
             }
         }
         Ok(())

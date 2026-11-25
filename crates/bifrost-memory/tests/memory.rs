@@ -47,6 +47,51 @@ fn region_queries_follow_current_protection_and_unmapped_gaps() {
 }
 
 #[test]
+fn page_loans_preserve_contents_and_allow_partial_returns_at_the_page_limit() {
+    let source = Addr(0x1000);
+    let destination = Addr(0x4000);
+    let mut memory = AddressSpace::new(4096, 3).unwrap();
+    memory.map(source, 8192, Protection::ReadWrite).unwrap();
+    memory
+        .map(Addr(0x5000), 4096, Protection::ReadWrite)
+        .unwrap();
+    memory.write(Addr(0x2000), &[12]).unwrap();
+    let previous_generation = memory.generation_at(source);
+    assert_eq!(
+        memory.lend_pages(source, destination, 8192),
+        Err(MemoryError::AlreadyMapped(Addr(0x5000)))
+    );
+    assert_eq!(memory.generation_at(source), previous_generation);
+    assert_eq!(memory.generation_at(destination), None);
+    memory.unmap(Addr(0x5000), 4096).unwrap();
+    memory
+        .map(Addr(0x6000), 4096, Protection::ReadWrite)
+        .unwrap();
+    memory.lend_pages(source, destination, 8192).unwrap();
+    assert_eq!(memory.mapped_pages(), 3);
+    assert!(memory.generation_at(source) > previous_generation);
+    assert_eq!(memory.region_at(Addr(0x5000)).end, Some(Addr(0x6000)));
+    assert!(memory.read(source, &mut [0]).is_err());
+    assert!(memory.unmap(source, 4096).is_err());
+    assert!(memory.protect(destination, 4096, Protection::Read).is_err());
+    assert!(memory.return_pages(source, Addr(0x5000), 4096).is_err());
+
+    let mut byte = [0];
+    memory.read(Addr(0x5000), &mut byte).unwrap();
+    assert_eq!(byte, [12]);
+    memory.write(Addr(0x5000), &[34]).unwrap();
+    memory
+        .return_pages(Addr(0x2000), Addr(0x5000), 4096)
+        .unwrap();
+    assert_eq!(memory.generation_at(Addr(0x5000)), None);
+    assert!(memory.read(source, &mut [0]).is_err());
+    memory.read(Addr(0x2000), &mut byte).unwrap();
+    assert_eq!(byte, [34]);
+    memory.return_pages(source, destination, 4096).unwrap();
+    assert_eq!(memory.mapped_pages(), 3);
+}
+
+#[test]
 fn guarded_stack_mapping_is_atomic() {
     let mut memory = AddressSpace::new(4096, 3).unwrap();
     memory
