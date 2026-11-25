@@ -28,6 +28,8 @@ pub(crate) const TRAP: i64 = 3;
 pub(crate) const HELPER_FAILED: i64 = 4;
 pub(crate) const ALIGNMENT_READ: i64 = 5;
 pub(crate) const ALIGNMENT_WRITE: i64 = 6;
+pub(crate) const DIV_UNSIGNED: u32 = 1 << 18;
+pub(crate) const DIV_SIGNED: u32 = 2 << 18;
 
 pub(crate) fn into_function(
     function: &mut Function,
@@ -136,6 +138,16 @@ impl Lowering<'_> {
                     IntOp::Mul => ins.imul(lhs.value, rhs),
                     IntOp::MulHighUnsigned => ins.umulhi(lhs.value, rhs),
                     IntOp::MulHighSigned => ins.smulhi(lhs.value, rhs),
+                    IntOp::DivUnsigned | IntOp::DivSigned => {
+                        // Cranelift division instructions have host trap sites.
+                        let options = if op == IntOp::DivSigned {
+                            DIV_SIGNED
+                        } else {
+                            DIV_UNSIGNED
+                        };
+                        self.call_helper(lhs.value, rhs, options);
+                        self.load(HELPER_VALUE)
+                    }
                     IntOp::And => ins.band(lhs.value, rhs),
                     IntOp::Or => ins.bor(lhs.value, rhs),
                     IntOp::Xor => ins.bxor(lhs.value, rhs),
@@ -301,12 +313,7 @@ impl Lowering<'_> {
                 }
                 let zero = self.immediate(0);
                 self.memory_access(guard, zero, layout, false)?;
-                let value = self.builder.ins().load(
-                    types::I64,
-                    MemFlagsData::trusted(),
-                    self.frame,
-                    HELPER_VALUE,
-                );
+                let value = self.load(HELPER_VALUE);
                 (out, value, layout.ty.bit_width())
             }
             Op::Store {
@@ -376,13 +383,7 @@ impl Lowering<'_> {
         let mut options = u32::from(width) | (u32::from(layout.alignment) << 8);
         options |= u32::from(layout.endian == Endian::Big) << 16;
         options |= u32::from(write) << 17;
-        let options = self.builder.ins().iconst(types::I32, i64::from(options));
-        let call = self.builder.ins().call_indirect(
-            self.helper_signature,
-            self.helper,
-            &[self.frame, self.memory, self.guards[&guard], value, options],
-        );
-        let status = self.builder.inst_results(call)[0];
+        let status = self.call_helper(self.guards[&guard], value, options);
         let fault = self.builder.create_block();
         let success = self.builder.create_block();
         self.builder.ins().brif(status, fault, &[], success, &[]);
@@ -390,6 +391,16 @@ impl Lowering<'_> {
         self.status(HELPER_FAILED);
         self.builder.switch_to_block(success);
         Ok(())
+    }
+
+    fn call_helper(&mut self, first: Value, second: Value, options: u32) -> Value {
+        let options = self.builder.ins().iconst(types::I32, i64::from(options));
+        let call = self.builder.ins().call_indirect(
+            self.helper_signature,
+            self.helper,
+            &[self.frame, self.memory, first, second, options],
+        );
+        self.builder.inst_results(call)[0]
     }
 
     fn signed(&mut self, scalar: Scalar) -> Value {
@@ -466,6 +477,12 @@ impl Lowering<'_> {
             Register::Arm64(Arm64Reg::Sp) => Ok((STACK, 64)),
             _ => Err(self.unsupported("register")),
         }
+    }
+
+    fn load(&mut self, offset: i32) -> Value {
+        self.builder
+            .ins()
+            .load(types::I64, MemFlagsData::trusted(), self.frame, offset)
     }
 
     fn store(&mut self, offset: i32, value: Value) {

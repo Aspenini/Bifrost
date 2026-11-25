@@ -326,6 +326,34 @@ impl Arm64Lifter {
                 ir.write(dst, result);
                 ir.next(next)
             }
+            Operation::Divide {
+                dst,
+                lhs,
+                rhs,
+                signed,
+                word,
+            } => {
+                let lhs = ir.read(lhs);
+                let rhs = ir.read(rhs);
+                let extend = match (word, signed) {
+                    (true, true) => AddressExtend::SignedWord,
+                    (true, false) => AddressExtend::UnsignedWord,
+                    (false, _) => AddressExtend::Doubleword,
+                };
+                let lhs = ir.extend_word(lhs, extend);
+                let rhs = ir.extend_word(rhs, extend);
+                let op = if signed {
+                    IntOp::DivSigned
+                } else {
+                    IntOp::DivUnsigned
+                };
+                let mut result = ir.binary(op, lhs, rhs);
+                if word {
+                    result = ir.with_immediate(IntOp::And, result, u64::from(u32::MAX));
+                }
+                ir.write(dst, result);
+                ir.next(next)
+            }
             Operation::Memory {
                 reg,
                 base,

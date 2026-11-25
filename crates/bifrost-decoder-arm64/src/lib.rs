@@ -137,6 +137,13 @@ pub enum Operation {
         rhs: Reg,
         signed: bool,
     },
+    Divide {
+        dst: Reg,
+        lhs: Reg,
+        rhs: Reg,
+        signed: bool,
+        word: bool,
+    },
     LogicalImmediate {
         kind: Logical,
         dst: Reg,
@@ -703,6 +710,15 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
             rhs: reg(word >> 16, false),
             condition: ((word >> 12) & 15) as u8,
             otherwise,
+            word: word >> 31 == 0,
+        };
+    }
+    if word & 0x7fe0_f800 == 0x1ac0_0800 {
+        return Operation::Divide {
+            dst,
+            lhs,
+            rhs: reg(word >> 16, false),
+            signed: word & (1 << 10) != 0,
             word: word >> 31 == 0,
         };
     }

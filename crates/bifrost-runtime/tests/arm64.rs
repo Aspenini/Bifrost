@@ -533,6 +533,49 @@ fn indexed_memory_faults_leave_the_base_and_destination_intact() {
 }
 
 #[test]
+fn integer_division_handles_zero_and_signed_overflow_without_trapping() {
+    for (word, lhs, rhs, expected) in [
+        (0x1ac2_0820, 0xabcd_1234_0000_000f, 4, 3),
+        (0x1ac2_0c20, u64::MAX - 14, 4, u64::from(u32::MAX - 2)),
+        (0x1ac2_0c20, 0x8000_0000, u64::MAX, 0x8000_0000),
+        (0x9ac2_0820, u64::MAX, 0, 0),
+        (0x9ac2_0c20, u64::MAX, 0, 0),
+        (0x9ac2_0c20, 1 << 63, u64::MAX, 1 << 63),
+    ] {
+        let (mut memory, mut thread) = memory_and_thread(&[word], Protection::ReadWrite);
+        let CpuState::AArch64(cpu) = &mut thread.cpu else {
+            unreachable!()
+        };
+        cpu.x[1] = lhs;
+        cpu.x[2] = rhs;
+        cpu.nzcv = 0xa000_0000;
+        let original = thread.clone();
+        let exit = RawInterpreter::new(&target(), &mut memory, &mut ())
+            .unwrap()
+            .step(&mut thread)
+            .unwrap();
+        assert_eq!(exit, ExitReason::Dispatch(Addr(CODE.0 + 4)));
+        assert_eq!(state(&thread).x[0], expected);
+        assert_eq!(state(&thread).nzcv, 0xa000_0000);
+        #[cfg(all(
+            feature = "jit-cranelift",
+            any(target_arch = "x86_64", target_arch = "aarch64"),
+            any(target_os = "linux", target_os = "windows")
+        ))]
+        {
+            use bifrost_runtime::raw::{RawJit, SystemJitMemory};
+            let mut jitted = original;
+            let actual = RawJit::new(&target(), &mut memory, &mut (), SystemJitMemory)
+                .unwrap()
+                .step(&mut jitted)
+                .unwrap();
+            assert_eq!(actual, exit);
+            assert_eq!(jitted, thread);
+        }
+    }
+}
+
+#[test]
 fn validates_arm64_feature_requirements_at_construction() {
     let (mut memory, _) = memory_and_thread(&[0xd503_201f], Protection::ReadWrite);
     for feature in [CpuFeature::Neon, CpuFeature::Lse] {

@@ -288,7 +288,13 @@ impl Values {
             }
             Op::Int { out, op, lhs, rhs } => {
                 let ty = self.integer(lhs)?;
-                if matches!(op, IntOp::MulHighUnsigned | IntOp::MulHighSigned) {
+                if matches!(
+                    op,
+                    IntOp::MulHighUnsigned
+                        | IntOp::MulHighSigned
+                        | IntOp::DivUnsigned
+                        | IntOp::DivSigned
+                ) {
                     self.expect(lhs, Type::I64)?;
                 }
                 self.expect(rhs, ty)?;

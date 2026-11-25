@@ -143,6 +143,10 @@ pub enum IntOp {
     Mul,
     MulHighUnsigned,
     MulHighSigned,
+    /// Return zero when the divisor is zero.
+    DivUnsigned,
+    /// Return zero for a zero divisor and the dividend for signed overflow.
+    DivSigned,
     And,
     Or,
     Xor,

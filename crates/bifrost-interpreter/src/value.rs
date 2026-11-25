@@ -46,6 +46,16 @@ impl Value {
                 let rhs = i128::from(rhs as i64);
                 ((lhs * rhs) >> 64) as u128
             }
+            IntOp::DivUnsigned => lhs.checked_div(rhs).unwrap_or(0),
+            IntOp::DivSigned => {
+                let lhs = lhs as i64;
+                let rhs = rhs as i64;
+                if rhs == 0 {
+                    0
+                } else {
+                    lhs.wrapping_div(rhs) as u128
+                }
+            }
             IntOp::And => lhs & rhs,
             IntOp::Or => lhs | rhs,
             IntOp::Xor => lhs ^ rhs,
