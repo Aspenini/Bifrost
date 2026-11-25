@@ -339,7 +339,7 @@ impl Arm64Lifter {
                 base,
                 offset,
                 load,
-                word,
+                size_log2,
                 pre_index,
             } => {
                 let original = ir.memory_base(base, load);
@@ -347,7 +347,7 @@ impl Arm64Lifter {
                 ir.access_scalar(
                     reg,
                     if pre_index { updated } else { original },
-                    if word { Type::I32 } else { Type::I64 },
+                    [Type::I8, Type::I16, Type::I32, Type::I64][usize::from(size_log2)],
                     load,
                 );
                 ir.write(base, updated);

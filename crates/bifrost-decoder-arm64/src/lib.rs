@@ -197,7 +197,7 @@ pub enum Operation {
         base: Reg,
         offset: u64,
         load: bool,
-        word: bool,
+        size_log2: u8,
         pre_index: bool,
     },
     RegisterOffsetMemory {
@@ -737,7 +737,7 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
         };
     }
     let mode = (word >> 10) & 3;
-    if matches!(mode, 1 | 3) && matches!(word & 0xbfe0_0000, 0xb800_0000 | 0xb840_0000) {
+    if matches!(mode, 1 | 3) && word & 0x3fa0_0000 == 0x3800_0000 {
         if dst == base {
             return Operation::Unsupported;
         }
@@ -746,7 +746,7 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
             base,
             offset: sign_extend(word >> 12, 9) as u64,
             load: word & (1 << 22) != 0,
-            word: word & (1 << 30) == 0,
+            size_log2: (word >> 30) as u8,
             pre_index: mode == 3,
         };
     }

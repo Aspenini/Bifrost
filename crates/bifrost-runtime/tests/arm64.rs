@@ -492,6 +492,8 @@ fn indexed_memory_faults_leave_the_base_and_destination_intact() {
     for (word, base) in [
         (0xf800_8c20, DATA.0 + 4096 - 8),
         (0xf85f_8422, DATA.0 + 4096),
+        (0x3840_1422, DATA.0 + 4096), // ldrb w2, [x1], #1
+        (0x7800_2c20, DATA.0 + 4094), // strh w0, [x1, #2]!
     ] {
         let (mut memory, mut thread) = memory_and_thread(&[word], Protection::ReadWrite);
         let CpuState::AArch64(cpu) = &mut thread.cpu else {
