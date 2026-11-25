@@ -696,6 +696,16 @@ impl Builder {
         match operand {
             Operand::Register(reg) => self.read(reg),
             Operand::Immediate(value) => self.integer(value),
+            Operand::Extended {
+                reg,
+                bits,
+                signed,
+                shift,
+            } => {
+                let value = self.read(reg);
+                let value = self.extend_register(value, bits, signed);
+                self.shift_register(value, RegisterShift::Left, shift, false)
+            }
         }
     }
 
@@ -919,14 +929,21 @@ impl Builder {
 
     fn extend_word(&mut self, value: ValueId, extend: AddressExtend) -> ValueId {
         match extend {
-            AddressExtend::UnsignedWord => {
-                self.with_immediate(IntOp::And, value, u64::from(u32::MAX))
-            }
-            AddressExtend::SignedWord => {
-                let low = self.shift_register(value, RegisterShift::Left, 32, false);
-                self.shift_register(low, RegisterShift::ArithmeticRight, 32, false)
-            }
+            AddressExtend::UnsignedWord => self.extend_register(value, 32, false),
+            AddressExtend::SignedWord => self.extend_register(value, 32, true),
             AddressExtend::Doubleword => value,
+        }
+    }
+
+    fn extend_register(&mut self, value: ValueId, bits: u8, signed: bool) -> ValueId {
+        let padding = 64 - bits;
+        if padding == 0 {
+            value
+        } else if signed {
+            let low = self.shift_register(value, RegisterShift::Left, padding, false);
+            self.shift_register(low, RegisterShift::ArithmeticRight, padding, false)
+        } else {
+            self.with_immediate(IntOp::And, value, u64::MAX >> padding)
         }
     }
 

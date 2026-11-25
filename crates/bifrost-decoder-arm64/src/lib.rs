@@ -18,6 +18,12 @@ pub enum Reg {
 pub enum Operand {
     Register(Reg),
     Immediate(u64),
+    Extended {
+        reg: Reg,
+        bits: u8,
+        signed: bool,
+        shift: u8,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -659,6 +665,24 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
             len,
             word: narrow,
         };
+    }
+    if word & 0x1fe0_0000 == 0x0b20_0000 {
+        let shift = ((word >> 10) & 7) as u8;
+        if shift > 4 {
+            return Operation::Undefined;
+        }
+        let option = (word >> 13) & 7;
+        return arithmetic(
+            word,
+            reg(word, word & (1 << 29) == 0),
+            reg(word >> 5, true),
+            Operand::Extended {
+                reg: reg(word >> 16, false),
+                bits: 8 << (option & 3),
+                signed: option & 4 != 0,
+                shift,
+            },
+        );
     }
     if word & 0x1f20_0000 == 0x0b00_0000 {
         let rhs = reg(word >> 16, false);

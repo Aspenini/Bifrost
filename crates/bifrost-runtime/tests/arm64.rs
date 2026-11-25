@@ -323,6 +323,9 @@ fn scalar_arithmetic_and_logic_use_the_correct_width_and_flags() {
         (0x6b82_7c20, 1, 0x8000_0000, 2, 0),    // subs w0,w1,w2,asr #31
         (0x0b42_1020, 1, 0x80, 9, NZCV),        // add w0,w1,w2,lsr #4
         (0x4b02_0020, 0, 1, 0xffff_ffff, NZCV), // sub w0,w1,w2
+        (0x4b22_0020, 300, 0x1ff, 45, NZCV),    // sub w0,w1,w2,uxtb
+        (0xab22_8820, 1, 0xff, 0xabcd_1233_ffff_fffd, NZCV), // adds x0,x1,w2,sxtb #2
+        (0x8b22_4fff, 0, 2, u64::MAX, NZCV),    // add sp,sp,w2,uxtw #3
         (0x2b02_0020, 0xffff_ffff, 1, 0, 0x6000_0000), // adds, zero and carry
         (0x2b02_0020, 0x7fff_ffff, 1, 0x8000_0000, 0x9000_0000), // adds, overflow
         (0x6b02_0020, 0, 1, 0xffff_ffff, 0x8000_0000), // subs, borrow
@@ -398,6 +401,7 @@ fn scalar_arithmetic_and_logic_use_the_correct_width_and_flags() {
         assert_eq!(state(&thread).x[0], expected, "instruction {word:#x}");
         assert_eq!(state(&thread).nzcv, flags, "instruction {word:#x}");
         let sp = match word {
+            0x8b22_4fff => Addr(state(&original).sp.0 + 16),
             0x1100_043f => Addr(0),
             0x3200_e03f => Addr(0x1111_1113),
             _ => state(&original).sp,
