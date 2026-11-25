@@ -155,6 +155,12 @@ fn report_lift_failure(
             immediate,
         }) => return Ok(ExitReason::Arm64SupervisorCall { pc, immediate }),
         #[cfg(feature = "guest-aarch64")]
+        ExecutionError::Arm64Lift(bifrost_lifter_arm64::LiftError::ReadCounter {
+            pc,
+            register,
+            rt,
+        }) => return Ok(ExitReason::Arm64ReadCounter { pc, register, rt }),
+        #[cfg(feature = "guest-aarch64")]
         ExecutionError::Arm64Lift(bifrost_lifter_arm64::LiftError::PointerAuth {
             pc,
             operation,

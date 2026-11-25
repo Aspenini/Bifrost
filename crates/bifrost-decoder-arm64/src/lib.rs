@@ -1,7 +1,7 @@
 //! Fixed-width decoder for Bifröst's bare A64 scalar profile.
 use bifrost_core::{
-    Arm64PointerAction, Arm64PointerAuth, Arm64PointerKey, Arm64PointerModifier, GuestAddress,
-    GuestMemoryRead, MemoryError,
+    Arm64CounterRegister, Arm64PointerAction, Arm64PointerAuth, Arm64PointerKey,
+    Arm64PointerModifier, GuestAddress, GuestMemoryRead, MemoryError,
 };
 use std::fmt;
 
@@ -325,6 +325,10 @@ pub enum Operation {
         dst: Reg,
         read_only: bool,
     },
+    ReadCounter {
+        register: Arm64CounterRegister,
+        rt: u8,
+    },
     WriteThreadPointer {
         src: Reg,
     },
@@ -560,6 +564,17 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
         return Operation::PointerAuth(operation);
     }
     match word & !31 {
+        kind @ (0xd53b_e000 | 0xd53b_e020 | 0xd53b_e040) => {
+            let register = match kind {
+                0xd53b_e000 => Arm64CounterRegister::Frequency,
+                0xd53b_e020 => Arm64CounterRegister::PhysicalCount,
+                _ => Arm64CounterRegister::VirtualCount,
+            };
+            return Operation::ReadCounter {
+                register,
+                rt: (word & 31) as u8,
+            };
+        }
         kind @ (0xd53b_d040 | 0xd53b_d060) => {
             return Operation::ReadThreadPointer {
                 dst: reg(word, false),

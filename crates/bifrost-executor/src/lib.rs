@@ -1,6 +1,6 @@
 //! Execution and scheduling contracts. Backends own their dispatch state.
 
-use bifrost_core::{Arm64PointerAuth, GuestAddress, GuestFault, GuestThread};
+use bifrost_core::{Arm64CounterRegister, Arm64PointerAuth, GuestAddress, GuestFault, GuestThread};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ExecutionBudget {
@@ -17,6 +17,13 @@ pub enum ExitReason {
     Arm64SupervisorCall {
         pc: GuestAddress,
         immediate: u16,
+    },
+    /// The host supplies the counter value, writes Xt (or discards it for XZR),
+    /// and advances the guest PC. Guest state is unchanged on exit.
+    Arm64ReadCounter {
+        pc: GuestAddress,
+        register: Arm64CounterRegister,
+        rt: u8,
     },
     /// Guest state is unchanged. The host applies its pointer-authentication policy.
     Arm64PointerAuth {

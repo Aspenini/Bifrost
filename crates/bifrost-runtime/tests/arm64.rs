@@ -132,6 +132,48 @@ fn reports_precise_fetch_and_data_faults_and_rejects_unsupported_instructions() 
 }
 
 #[test]
+fn generic_timer_reads_exit_without_changing_guest_state() {
+    use bifrost_runtime::core::Arm64CounterRegister;
+
+    for (word, register, rt) in [
+        (0xd53b_e007, Arm64CounterRegister::Frequency, 7),
+        (0xd53b_e020, Arm64CounterRegister::PhysicalCount, 0),
+        (0xd53b_e05f, Arm64CounterRegister::VirtualCount, 31),
+    ] {
+        let (mut memory, mut thread) = memory_and_thread(&[word], Protection::ReadWrite);
+        let previous = thread.cpu.clone();
+        let expected = ExitReason::Arm64ReadCounter {
+            pc: CODE,
+            register,
+            rt,
+        };
+        let observed = RawInterpreter::new(&target(), &mut memory, &mut ())
+            .unwrap()
+            .step(&mut thread)
+            .unwrap();
+        assert_eq!(observed, expected);
+        assert_eq!(thread.cpu, previous);
+        assert!(thread.pending_fault.is_none());
+
+        #[cfg(all(
+            feature = "jit-cranelift",
+            any(target_arch = "x86_64", target_arch = "aarch64"),
+            any(target_os = "linux", target_os = "windows")
+        ))]
+        {
+            use bifrost_runtime::raw::{RawJit, SystemJitMemory};
+            let observed = RawJit::new(&target(), &mut memory, &mut (), SystemJitMemory)
+                .unwrap()
+                .step(&mut thread)
+                .unwrap();
+            assert_eq!(observed, expected);
+            assert_eq!(thread.cpu, previous);
+            assert!(thread.pending_fault.is_none());
+        }
+    }
+}
+
+#[test]
 fn supervisor_call_exits_without_changing_guest_state() {
     const IMMEDIATE: u16 = 0x8123;
     let call = 0xd400_0001 | (u32::from(IMMEDIATE) << 5);

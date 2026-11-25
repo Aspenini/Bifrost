@@ -1,8 +1,8 @@
 //! Lift the bare ARM64 scalar profile to verified-backend-neutral Bifröst IR.
 
 use bifrost_core::{
-    AbiId, Arm64PointerAuth, CpuFeatureSet, FaultClass, GuestAddress, GuestIsa, GuestMemoryRead,
-    GuestOs, GuestTarget, TargetError,
+    AbiId, Arm64CounterRegister, Arm64PointerAuth, CpuFeatureSet, FaultClass, GuestAddress,
+    GuestIsa, GuestMemoryRead, GuestOs, GuestTarget, TargetError,
 };
 use bifrost_decoder_arm64::{
     AddressExtend, Bitfield, ConditionalElse, DecodeError, DecodedInstruction, Logical, Operand,
@@ -30,6 +30,11 @@ pub enum LiftError {
         pc: GuestAddress,
         immediate: u16,
     },
+    ReadCounter {
+        pc: GuestAddress,
+        register: Arm64CounterRegister,
+        rt: u8,
+    },
     PointerAuth {
         pc: GuestAddress,
         operation: Arm64PointerAuth,
@@ -51,6 +56,9 @@ impl fmt::Display for LiftError {
             }
             Self::PointerAuth { pc, .. } => {
                 write!(f, "ARM64 pointer authentication at {:#x}", pc.0)
+            }
+            Self::ReadCounter { pc, register, .. } => {
+                write!(f, "ARM64 {register:?} timer read at {:#x}", pc.0)
             }
             Self::UnsupportedInstruction { pc, word, features } => write!(
                 f,
@@ -740,6 +748,9 @@ impl Arm64Lifter {
             }
             Operation::SupervisorCall { immediate } => {
                 return Err(LiftError::SupervisorCall { pc, immediate });
+            }
+            Operation::ReadCounter { register, rt } => {
+                return Err(LiftError::ReadCounter { pc, register, rt });
             }
             Operation::ReadThreadPointer { dst, read_only } => {
                 let register = Register::Arm64(if read_only {

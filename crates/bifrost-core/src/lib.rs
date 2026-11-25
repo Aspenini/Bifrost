@@ -8,6 +8,14 @@ pub use capability::*;
 pub use cpu::*;
 pub use platform_api::*;
 
+/// User-visible registers of the AArch64 generic timer.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Arm64CounterRegister {
+    Frequency,
+    PhysicalCount,
+    VirtualCount,
+}
+
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum GuestIsa {
