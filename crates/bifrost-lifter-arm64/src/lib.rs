@@ -633,6 +633,29 @@ impl Arm64Lifter {
             Operation::SupervisorCall { immediate } => {
                 return Err(LiftError::SupervisorCall { pc, immediate });
             }
+            Operation::ReadThreadPointer { dst, read_only } => {
+                let register = Register::Arm64(if read_only {
+                    Arm64Reg::TpidrroEl0
+                } else {
+                    Arm64Reg::TpidrEl0
+                });
+                let pointer = ir.value(|out| Op::ReadRegister { out, register });
+                let bits = ir.value(|out| Op::AddressToInt {
+                    out,
+                    value: pointer,
+                });
+                ir.write(dst, bits);
+                ir.next(next)
+            }
+            Operation::WriteThreadPointer { src } => {
+                let bits = ir.read(src);
+                let value = ir.address(bits);
+                ir.emit(Op::WriteRegister {
+                    register: Register::Arm64(Arm64Reg::TpidrEl0),
+                    value,
+                });
+                ir.next(next)
+            }
             Operation::PointerAuth(operation) => {
                 return Err(LiftError::PointerAuth { pc, operation });
             }

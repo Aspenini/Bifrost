@@ -103,6 +103,7 @@ pub enum Arm64Reg {
     Sp,
     Nzcv,
     TpidrEl0,
+    TpidrroEl0,
     Fpcr,
     Fpsr,
 }
@@ -125,9 +126,10 @@ impl Register {
             (GuestIsa::X86_64, Self::X86(X86Reg::Mxcsr)) => Some(Type::I32),
             (GuestIsa::AArch64, Self::Arm64(Arm64Reg::X(i))) if i < 31 => Some(Type::I64),
             (GuestIsa::AArch64, Self::Arm64(Arm64Reg::V(i))) if i < 32 => Some(Type::V128),
-            (GuestIsa::AArch64, Self::Arm64(Arm64Reg::Sp | Arm64Reg::TpidrEl0)) => {
-                Some(Type::GuestAddress)
-            }
+            (
+                GuestIsa::AArch64,
+                Self::Arm64(Arm64Reg::Sp | Arm64Reg::TpidrEl0 | Arm64Reg::TpidrroEl0),
+            ) => Some(Type::GuestAddress),
             (GuestIsa::AArch64, Self::Arm64(Arm64Reg::Nzcv | Arm64Reg::Fpcr | Arm64Reg::Fpsr)) => {
                 Some(Type::I32)
             }

@@ -164,6 +164,7 @@ pub struct Arm64State {
     pub pc: GuestAddress,
     pub nzcv: u32,
     pub tpidr_el0: GuestAddress,
+    pub tpidrro_el0: GuestAddress,
     pub v: [u128; 32],
     pub fpcr: u32,
     pub fpsr: u32,

@@ -299,6 +299,13 @@ pub enum Operation {
     SupervisorCall {
         immediate: u16,
     },
+    ReadThreadPointer {
+        dst: Reg,
+        read_only: bool,
+    },
+    WriteThreadPointer {
+        src: Reg,
+    },
     PointerAuth(Arm64PointerAuth),
     Fence,
     Undefined,
@@ -528,6 +535,21 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
     }
     if let Some(operation) = pointer_auth(word) {
         return Operation::PointerAuth(operation);
+    }
+    match word & !31 {
+        kind @ (0xd53b_d040 | 0xd53b_d060) => {
+            return Operation::ReadThreadPointer {
+                dst: reg(word, false),
+                read_only: kind == 0xd53b_d060,
+            };
+        }
+        0xd51b_d040 => {
+            return Operation::WriteThreadPointer {
+                src: reg(word, false),
+            };
+        }
+        0xd51b_d060 => return Operation::Undefined,
+        _ => {}
     }
     if word & 0x7fff_fc00 == 0x5ac0_0000 {
         return Operation::ReverseBits {

@@ -22,6 +22,8 @@ struct Frame {
     detail: u64,
     helper_value: u64,
     helper_high: u64,
+    tpidr: u64,
+    tpidrro: u64,
 }
 
 const _: () = {
@@ -30,6 +32,8 @@ const _: () = {
     assert!(offset_of!(Frame, detail) == lower::FAULT_DETAIL as usize);
     assert!(offset_of!(Frame, helper_value) == lower::HELPER_VALUE as usize);
     assert!(offset_of!(Frame, helper_high) == lower::HELPER_HIGH as usize);
+    assert!(offset_of!(Frame, tpidr) == lower::TPIDR as usize);
+    assert!(offset_of!(Frame, tpidrro) == lower::TPIDRRO as usize);
 };
 
 type Helper = unsafe extern "C" fn(*mut Frame, *mut c_void, u64, u64, u32) -> u32;
@@ -122,6 +126,8 @@ impl<Image: ExecutableImage> PublishedBlock<Image> {
             detail: 0,
             helper_value: 0,
             helper_high: 0,
+            tpidr: 0,
+            tpidrro: 0,
         };
         match &thread.cpu {
             CpuState::X86_64(state) => {
@@ -132,6 +138,8 @@ impl<Image: ExecutableImage> PublishedBlock<Image> {
                 frame.general[..31].copy_from_slice(&state.x);
                 frame.general[31] = state.sp.0;
                 frame.flags = u64::from(state.nzcv);
+                frame.tpidr = state.tpidr_el0.0;
+                frame.tpidrro = state.tpidrro_el0.0;
             }
             _ => return Err(ExecutionError::WrongGuestIsa),
         }
@@ -162,6 +170,7 @@ impl<Image: ExecutableImage> PublishedBlock<Image> {
                 state.x.copy_from_slice(&frame.general[..31]);
                 state.sp = GuestAddress(frame.general[31]);
                 state.nzcv = frame.flags as u32;
+                state.tpidr_el0 = GuestAddress(frame.tpidr);
             }
             _ => return Err(ExecutionError::WrongGuestIsa),
         }

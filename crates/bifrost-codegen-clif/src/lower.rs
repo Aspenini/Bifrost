@@ -21,6 +21,8 @@ pub(crate) const NEXT_PC: i32 = 33 * 8;
 pub(crate) const FAULT_DETAIL: i32 = 34 * 8;
 pub(crate) const HELPER_VALUE: i32 = 35 * 8;
 pub(crate) const HELPER_HIGH: i32 = 36 * 8;
+pub(crate) const TPIDR: i32 = 37 * 8;
+pub(crate) const TPIDRRO: i32 = 38 * 8;
 pub(crate) const DISPATCH: i64 = 0;
 pub(crate) const NONCANONICAL: i64 = 1;
 pub(crate) const ILLEGAL: i64 = 2;
@@ -475,6 +477,8 @@ impl Lowering<'_> {
             Register::X86(X86Reg::Rflags) => Ok((FLAGS, 64)),
             Register::Arm64(Arm64Reg::Nzcv) => Ok((FLAGS, 32)),
             Register::Arm64(Arm64Reg::Sp) => Ok((STACK, 64)),
+            Register::Arm64(Arm64Reg::TpidrEl0) => Ok((TPIDR, 64)),
+            Register::Arm64(Arm64Reg::TpidrroEl0) => Ok((TPIDRRO, 64)),
             _ => Err(self.unsupported("register")),
         }
     }

@@ -582,6 +582,45 @@ fn integer_division_handles_zero_and_signed_overflow_without_trapping() {
 }
 
 #[test]
+fn thread_pointer_instructions_keep_the_read_only_pointer_separate() {
+    let (mut memory, mut thread) = memory_and_thread(
+        &[0xd51b_d041, 0xd53b_d042, 0xd53b_d063, 0xd51b_d061],
+        Protection::ReadWrite,
+    );
+    let CpuState::AArch64(cpu) = &mut thread.cpu else {
+        unreachable!()
+    };
+    cpu.tpidrro_el0 = Addr(0x1234_5678);
+    let original = thread.clone();
+    let budget = ExecutionBudget { instructions: 4 };
+    let exit = RawInterpreter::new(&target(), &mut memory, &mut ())
+        .unwrap()
+        .run(&mut thread, budget)
+        .unwrap();
+    assert!(
+        matches!(exit, ExitReason::Fault(fault) if fault.class == FaultClass::IllegalInstruction && fault.pc == Addr(CODE.0 + 12))
+    );
+    assert_eq!(state(&thread).x[2..4], [DATA.0, 0x1234_5678]);
+    assert_eq!(state(&thread).tpidr_el0, DATA);
+    assert_eq!(state(&thread).tpidrro_el0, Addr(0x1234_5678));
+    #[cfg(all(
+        feature = "jit-cranelift",
+        any(target_arch = "x86_64", target_arch = "aarch64"),
+        any(target_os = "linux", target_os = "windows")
+    ))]
+    {
+        use bifrost_runtime::raw::{RawJit, SystemJitMemory};
+        let mut jitted = original;
+        let actual = RawJit::new(&target(), &mut memory, &mut (), SystemJitMemory)
+            .unwrap()
+            .run(&mut jitted, budget)
+            .unwrap();
+        assert_eq!(actual, exit);
+        assert_eq!(jitted, thread);
+    }
+}
+
+#[test]
 fn validates_arm64_feature_requirements_at_construction() {
     let (mut memory, _) = memory_and_thread(&[0xd503_201f], Protection::ReadWrite);
     for feature in [CpuFeature::Neon, CpuFeature::Lse] {

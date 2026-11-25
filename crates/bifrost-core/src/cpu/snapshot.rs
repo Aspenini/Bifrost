@@ -5,7 +5,8 @@ use std::fmt;
 
 const MAGIC: &[u8; 4] = b"BFRS";
 const HEADER: usize = 8;
-const VERSION: u8 = 1;
+const ORIGINAL_VERSION: u8 = 1;
+const ARM64_VERSION: u8 = 2;
 const X86_BYTES: usize = 16 * 8 + 4 * 8 + 16 * 16 + 4;
 const ARM64_BYTES: usize = 31 * 8 + 2 * 8 + 4 + 8 + 32 * 16 + 2 * 4;
 
@@ -37,15 +38,15 @@ impl fmt::Display for SnapshotError {
 impl std::error::Error for SnapshotError {}
 
 impl CpuState {
-    /// Encodes all modeled registers as little-endian bits in the version 1 format.
+    /// Encodes all modeled registers as little-endian bits.
     pub fn encode_snapshot(&self) -> Vec<u8> {
-        let (isa, size) = match self {
-            Self::X86_64(_) => (1, X86_BYTES),
-            Self::AArch64(_) => (2, ARM64_BYTES),
+        let (version, isa, size) = match self {
+            Self::X86_64(_) => (ORIGINAL_VERSION, 1, X86_BYTES),
+            Self::AArch64(_) => (ARM64_VERSION, 2, ARM64_BYTES + 8),
         };
         let mut bytes = Vec::with_capacity(HEADER + size);
         bytes.extend_from_slice(MAGIC);
-        bytes.extend([VERSION, isa, 0, 0]);
+        bytes.extend([version, isa, 0, 0]);
         match self {
             Self::X86_64(state) => {
                 bytes.extend(state.gpr.iter().flat_map(|value| value.to_le_bytes()));
@@ -64,6 +65,7 @@ impl CpuState {
                 bytes.extend(state.v.iter().flat_map(|value| value.to_le_bytes()));
                 bytes.extend(state.fpcr.to_le_bytes());
                 bytes.extend(state.fpsr.to_le_bytes());
+                bytes.extend(state.tpidrro_el0.0.to_le_bytes());
             }
         }
         bytes
@@ -77,14 +79,15 @@ impl CpuState {
         if &header[..4] != MAGIC || header[6..] != [0, 0] {
             return Err(SnapshotError::Header);
         }
-        if header[4] != VERSION {
+        let version = header[4];
+        let isa = header[5];
+        if version != ORIGINAL_VERSION && !(version == ARM64_VERSION && isa == 2) {
             return Err(SnapshotError::Version(header[4]));
         }
-        let isa = header[5];
         let expected = HEADER
             + match isa {
                 1 => X86_BYTES,
-                2 => ARM64_BYTES,
+                2 => ARM64_BYTES + if version == ARM64_VERSION { 8 } else { 0 },
                 _ => return Err(SnapshotError::Isa(isa)),
             };
         if bytes.len() != expected {
@@ -114,6 +117,11 @@ impl CpuState {
                 v: std::array::from_fn(|_| read.u128()),
                 fpcr: read.u32(),
                 fpsr: read.u32(),
+                tpidrro_el0: if version == ARM64_VERSION {
+                    GuestAddress(read.u64())
+                } else {
+                    GuestAddress(0)
+                },
             })))
         }
     }
@@ -161,6 +169,7 @@ mod tests {
             pc: GuestAddress(0x4000),
             nzcv: 0xb0000000,
             tpidr_el0: GuestAddress(0x5000),
+            tpidrro_el0: GuestAddress(0x6000),
             v: std::array::from_fn(|index| (1_u128 << 124) + index as u128),
             fpcr: 0x400000,
             fpsr: 0x11,
@@ -172,6 +181,18 @@ mod tests {
                 assert!(CpuState::decode_snapshot(&bytes[..prefix]).is_err());
             }
         }
+    }
+
+    #[test]
+    fn restores_version_one_arm64_snapshots() {
+        let state = CpuState::AArch64(Box::new(Arm64State {
+            tpidr_el0: GuestAddress(0x1234),
+            ..Default::default()
+        }));
+        let mut bytes = state.encode_snapshot();
+        bytes[4] = ORIGINAL_VERSION;
+        bytes.truncate(HEADER + ARM64_BYTES);
+        assert_eq!(CpuState::decode_snapshot(&bytes), Ok(state));
     }
 
     #[test]

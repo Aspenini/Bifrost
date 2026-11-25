@@ -1,6 +1,6 @@
 use crate::{
-    BlockId, Edge, Exit, IntOp, IrBlock, IrFunction, MemoryAccess, MemoryLayout, Op, Register,
-    Type, ValueId,
+    Arm64Reg, BlockId, Edge, Exit, IntOp, IrBlock, IrFunction, MemoryAccess, MemoryLayout, Op,
+    Register, Type, ValueId,
 };
 use bifrost_core::{CpuFeature, GuestAddress, GuestTarget};
 use std::collections::{BTreeMap, BTreeSet};
@@ -358,6 +358,9 @@ impl Values {
             }
             Op::ReadRegister { out, register } => (out, register_type(register)?),
             Op::WriteRegister { register, value } => {
+                if register == Register::Arm64(Arm64Reg::TpidrroEl0) {
+                    return Err(VerifyErrorKind::InvalidRegister(register));
+                }
                 return self.expect(value, register_type(register)?);
             }
             Op::Guard {
