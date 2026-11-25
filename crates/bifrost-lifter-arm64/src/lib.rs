@@ -6,7 +6,7 @@ use bifrost_core::{
 };
 use bifrost_decoder_arm64::{
     AddressExtend, Bitfield, ConditionalElse, DecodeError, DecodedInstruction, Logical, Operand,
-    Operation, Reg, RegisterShift, fetch,
+    Operation, PairAddressing, Reg, RegisterShift, fetch,
 };
 use bifrost_ir::*;
 use std::fmt;
@@ -391,6 +391,7 @@ impl Arm64Lifter {
                 base,
                 offset,
                 load,
+                addressing,
             }
             | Operation::DoublePair {
                 first,
@@ -398,6 +399,7 @@ impl Arm64Lifter {
                 base,
                 offset,
                 load,
+                addressing,
             } => {
                 let double = matches!(instruction.operation(), Operation::DoublePair { .. });
                 let layout = if double {
@@ -405,8 +407,13 @@ impl Arm64Lifter {
                 } else {
                     QWORD
                 };
-                let base = ir.memory_base(base, load);
-                let address = ir.with_immediate(IntOp::Add, base, offset);
+                let original = ir.memory_base(base, load);
+                let updated = ir.with_immediate(IntOp::Add, original, offset);
+                let address = if addressing == PairAddressing::PostIndex {
+                    original
+                } else {
+                    updated
+                };
                 let address = ir.address(address);
                 let access = if load {
                     MemoryAccess::Read
@@ -466,6 +473,9 @@ impl Arm64Lifter {
                         value,
                         layout: QWORD,
                     });
+                }
+                if addressing != PairAddressing::Offset {
+                    ir.write(base, updated);
                 }
                 ir.next(next)
             }

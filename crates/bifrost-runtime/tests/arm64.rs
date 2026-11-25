@@ -590,8 +590,10 @@ fn test_branches_use_the_selected_register_width_and_bit() {
 
 #[test]
 fn register_pairs_transfer_contiguous_values_and_guard_the_whole_span() {
-    check_register_pair([0x293f_8820, 0x297f_9023], 4); // stp/ldp with W registers and #-4
-    check_register_pair([0xa93f_8820, 0xa97f_9023], 8); // stp/ldp with X registers and #-8
+    check_register_pair([0x293f_8820, 0x297f_9023], 4, false);
+    check_register_pair([0xa93f_8820, 0xa97f_9023], 8, false);
+    check_register_pair([0x29bf_8820, 0x28c0_9023], 4, true);
+    check_register_pair([0xa9bf_8820, 0xa8c0_9023], 8, true);
 }
 
 #[test]
@@ -695,7 +697,7 @@ fn stack_relative_memory_checks_sp_alignment_before_access() {
     }
 }
 
-fn check_register_pair(code: [u32; 2], width: usize) {
+fn check_register_pair(code: [u32; 2], width: usize, writeback: bool) {
     let first: u64 = 0xdead_beef_1122_3344;
     let second: u64 = 0xdead_beef_aabb_ccdd;
     for fault in [None, Some(AccessKind::Write), Some(AccessKind::Read)] {
@@ -717,7 +719,11 @@ fn check_register_pair(code: [u32; 2], width: usize) {
             unreachable!()
         };
         cpu.x[0] = first;
-        cpu.x[1] = address.0 + width as u64;
+        cpu.x[1] = if writeback && fault == Some(AccessKind::Read) {
+            address.0
+        } else {
+            address.0 + width as u64
+        };
         cpu.x[2] = second;
         cpu.x[3] = u64::MAX;
         cpu.x[4] = u64::MAX;

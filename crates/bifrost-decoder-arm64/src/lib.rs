@@ -70,6 +70,13 @@ pub enum AddressExtend {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PairAddressing {
+    Offset,
+    PostIndex,
+    PreIndex,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum Operation {
     Nop,
@@ -208,6 +215,7 @@ pub enum Operation {
         base: Reg,
         offset: u64,
         load: bool,
+        addressing: PairAddressing,
     },
     DoublePair {
         first: Reg,
@@ -215,6 +223,7 @@ pub enum Operation {
         base: Reg,
         offset: u64,
         load: bool,
+        addressing: PairAddressing,
     },
     Branch {
         target: GuestAddress,
@@ -782,10 +791,18 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
             }
         };
     }
-    if word & 0x7f80_0000 == 0x2900_0000 {
+    if word & 0x7e00_0000 == 0x2800_0000 {
+        let addressing = match (word >> 23) & 3 {
+            1 => PairAddressing::PostIndex,
+            2 => PairAddressing::Offset,
+            3 => PairAddressing::PreIndex,
+            _ => return Operation::Unsupported,
+        };
         let load = word & (1 << 22) != 0;
         let second = reg(word >> 10, false);
-        if load && dst == second {
+        if (load && dst == second)
+            || (addressing != PairAddressing::Offset && (base == dst || base == second))
+        {
             return Operation::Unsupported;
         }
         let imm = sign_extend(word >> 15, 7);
@@ -796,6 +813,7 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
                 base,
                 offset: (imm * 4) as u64,
                 load,
+                addressing,
             }
         } else {
             Operation::DoublePair {
@@ -804,6 +822,7 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
                 base,
                 offset: (imm * 8) as u64,
                 load,
+                addressing,
             }
         };
     }
