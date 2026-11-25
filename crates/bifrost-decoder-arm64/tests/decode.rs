@@ -57,7 +57,7 @@ fn distinguishes_sp_and_zero_and_sign_extends_branch_targets() {
 
 #[test]
 fn rejects_other_forms_and_unaligned_fetches() {
-    assert_eq!(op(0x8b01_0400), Operation::Unsupported); // add x0,x0,x1,lsl #1
+    assert_eq!(op(0x8bc1_0400), Operation::Undefined); // reserved ROR form of add
     assert_eq!(
         op(0xf940_03e0),
         Operation::Memory {

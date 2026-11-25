@@ -262,20 +262,25 @@ impl Arm64Lifter {
                 flags,
             } => {
                 let word = matches!(instruction.operation(), Operation::ArithmeticWord { .. });
-                let mut lhs = ir.read(lhs);
-                let mut rhs = ir.operand(rhs);
-                if word {
-                    lhs = ir.with_immediate(IntOp::And, lhs, u64::from(u32::MAX));
-                    rhs = ir.with_immediate(IntOp::And, rhs, u64::from(u32::MAX));
-                }
-                let mut result = ir.binary(if sub { IntOp::Sub } else { IntOp::Add }, lhs, rhs);
-                if word {
-                    result = ir.with_immediate(IntOp::And, result, u64::from(u32::MAX));
-                }
-                if flags {
-                    ir.flags(lhs, rhs, result, sub, if word { 0 } else { 32 });
-                }
-                ir.write(dst, result);
+                let lhs = ir.read(lhs);
+                let rhs = ir.operand(rhs);
+                ir.arithmetic(dst, lhs, rhs, sub, flags, word);
+                ir.next(next)
+            }
+            Operation::ArithmeticShifted {
+                dst,
+                lhs,
+                rhs,
+                shift,
+                amount,
+                sub,
+                flags,
+                word,
+            } => {
+                let lhs = ir.read(lhs);
+                let rhs = ir.read(rhs);
+                let rhs = ir.shift_register(rhs, shift, amount, word);
+                ir.arithmetic(dst, lhs, rhs, sub, flags, word);
                 ir.next(next)
             }
             Operation::MultiplyAccumulate {
@@ -503,8 +508,15 @@ impl Arm64Lifter {
                 let take = ir.test_zero(value, nonzero);
                 ir.branch(take, target, next)
             }
-            Operation::Return(reg) => {
+            Operation::Return(reg) | Operation::BranchRegister { reg, .. } => {
                 let destination = ir.read(reg);
+                if matches!(
+                    instruction.operation(),
+                    Operation::BranchRegister { link: true, .. }
+                ) {
+                    let lr = ir.integer(next.0);
+                    ir.write(Reg::X(30), lr);
+                }
                 Exit::NextPc(ir.address(destination))
             }
             Operation::SupervisorCall { immediate } => {
@@ -725,6 +737,29 @@ impl Builder {
         if kind == Logical::Ands {
             let flags = self.nz_flags(result, if word { 0 } else { 32 });
             self.write_flags(flags);
+        }
+        self.write(dst, result);
+    }
+
+    fn arithmetic(
+        &mut self,
+        dst: Reg,
+        mut lhs: ValueId,
+        mut rhs: ValueId,
+        sub: bool,
+        flags: bool,
+        word: bool,
+    ) {
+        if word {
+            lhs = self.with_immediate(IntOp::And, lhs, u64::from(u32::MAX));
+            rhs = self.with_immediate(IntOp::And, rhs, u64::from(u32::MAX));
+        }
+        let mut result = self.binary(if sub { IntOp::Sub } else { IntOp::Add }, lhs, rhs);
+        if word {
+            result = self.with_immediate(IntOp::And, result, u64::from(u32::MAX));
+        }
+        if flags {
+            self.flags(lhs, rhs, result, sub, if word { 0 } else { 32 });
         }
         self.write(dst, result);
     }

@@ -97,6 +97,16 @@ pub enum Operation {
         sub: bool,
         flags: bool,
     },
+    ArithmeticShifted {
+        dst: Reg,
+        lhs: Reg,
+        rhs: Reg,
+        shift: RegisterShift,
+        amount: u8,
+        sub: bool,
+        flags: bool,
+        word: bool,
+    },
     MultiplyAccumulate {
         dst: Reg,
         lhs: Reg,
@@ -223,6 +233,10 @@ pub enum Operation {
         nonzero: bool,
     },
     Return(Reg),
+    BranchRegister {
+        reg: Reg,
+        link: bool,
+    },
     SupervisorCall {
         immediate: u16,
     },
@@ -599,9 +613,27 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
             word: narrow,
         };
     }
-    if word & 0x1fe0_fc00 == 0x0b00_0000 {
-        let rhs = Operand::Register(reg(word >> 16, false));
-        return arithmetic(word, dst, lhs, rhs);
+    if word & 0x1f20_0000 == 0x0b00_0000 {
+        let rhs = reg(word >> 16, false);
+        let shift = RegisterShift::decode(word >> 22);
+        let amount = ((word >> 10) & 63) as u8;
+        let narrow = word >> 31 == 0;
+        if shift == RegisterShift::RotateRight || (narrow && amount >= 32) {
+            return Operation::Undefined;
+        }
+        if amount == 0 {
+            return arithmetic(word, dst, lhs, Operand::Register(rhs));
+        }
+        return Operation::ArithmeticShifted {
+            dst,
+            lhs,
+            rhs,
+            shift,
+            amount,
+            sub: word & (1 << 30) != 0,
+            flags: word & (1 << 29) != 0,
+            word: narrow,
+        };
     }
     if word & 0x7fe0_f000 == 0x1ac0_2000 {
         return Operation::VariableShift {
@@ -755,6 +787,12 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
             reg: dst,
             bit: (((word >> 31) << 5) | ((word >> 19) & 31)) as u8,
             nonzero: word & (1 << 24) != 0,
+        };
+    }
+    if let kind @ (0xd61f_0000 | 0xd63f_0000) = word & 0xffff_fc1f {
+        return Operation::BranchRegister {
+            reg: lhs,
+            link: kind == 0xd63f_0000,
         };
     }
     if word & 0xffff_fc1f == 0xd65f_0000 && lhs != Reg::Zero {

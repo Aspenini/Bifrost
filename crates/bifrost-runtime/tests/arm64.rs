@@ -318,51 +318,54 @@ fn scalar_arithmetic_and_logic_use_the_correct_width_and_flags() {
     const NZCV: u32 = 0xa000_0000;
     // The inputs carry nonzero high halves to catch accidental 64-bit arithmetic.
     for (word, lhs, rhs, expected, flags) in [
-        (0x0b02_0020, 0xffff_ffff, 1, 0, NZCV),        // add w0,w1,w2
-        (0x4b02_0020, 0, 1, 0xffff_ffff, NZCV),        // sub w0,w1,w2
+        (0x0b02_0020, 0xffff_ffff, 1, 0, NZCV), // add w0,w1,w2
+        (0x8b02_0820, 1, 2, 0xf49f_c168_0000_0009, NZCV), // add x0,x1,x2,lsl #2
+        (0x6b82_7c20, 1, 0x8000_0000, 2, 0),    // subs w0,w1,w2,asr #31
+        (0x0b42_1020, 1, 0x80, 9, NZCV),        // add w0,w1,w2,lsr #4
+        (0x4b02_0020, 0, 1, 0xffff_ffff, NZCV), // sub w0,w1,w2
         (0x2b02_0020, 0xffff_ffff, 1, 0, 0x6000_0000), // adds, zero and carry
         (0x2b02_0020, 0x7fff_ffff, 1, 0x8000_0000, 0x9000_0000), // adds, overflow
         (0x6b02_0020, 0, 1, 0xffff_ffff, 0x8000_0000), // subs, borrow
         (0x6b02_0020, 0x8000_0000, 1, 0x7fff_ffff, 0x3000_0000), // subs, overflow and no borrow
-        (0x1140_0420, 0xab, 0, 0x10ab, NZCV),          // add w0,w1,#1,lsl #12
-        (0x7100_043f, 1, 0, u64::MAX, 0x6000_0000),    // cmp w1,#1
+        (0x1140_0420, 0xab, 0, 0x10ab, NZCV),   // add w0,w1,#1,lsl #12
+        (0x7100_043f, 1, 0, u64::MAX, 0x6000_0000), // cmp w1,#1
         (0x1100_043f, 0xffff_ffff, 0, u64::MAX, NZCV), // add wsp,w1,#1
-        (0x3200_f3e0, 0, 0, 0x5555_5555, NZCV),        // orr w0,wzr,#0x55555555
+        (0x3200_f3e0, 0, 0, 0x5555_5555, NZCV), // orr w0,wzr,#0x55555555
         (0x1208_9c20, 0x1234_56ab, 0, 0x1200_5600, NZCV), // and w0,w1,#0xff00ff00
         (0xd241_0420, 1, 0, 0x2bcd_1234_0000_0000, NZCV), // eor x0,x1,#0x8000000000000001
         (0x7201_0020, 0x8000_0000, 0, 0x8000_0000, 0x8000_0000), // ands w0,w1,#0x80000000, negative
         (0x7201_0020, 0x7fff_ffff, 0, 0, 0x4000_0000), // ands w0,w1,#0x80000000, zero
-        (0xf241_043f, 0, 0, u64::MAX, 0x8000_0000),    // tst x1,#0x8000000000000001
-        (0x3200_e03f, 2, 0, u64::MAX, NZCV),           // orr wsp,w1,#0x11111111
+        (0xf241_043f, 0, 0, u64::MAX, 0x8000_0000), // tst x1,#0x8000000000000001
+        (0x3200_e03f, 2, 0, u64::MAX, NZCV),    // orr wsp,w1,#0x11111111
         (0x1b02_7c20, 0xffff_ffff, 2, 0xffff_fffe, NZCV), // mul w0,w1,w2
-        (0x1b02_0c20, 2, 3, 13, NZCV),                 // madd w0,w1,w2,w3
-        (0x1b02_8c20, 2, 4, 0xffff_ffff, NZCV),        // msub w0,w1,w2,w3
-        (0x1b02_fc20, 2, 3, 0xffff_fffa, NZCV),        // mneg w0,w1,w2
+        (0x1b02_0c20, 2, 3, 13, NZCV),          // madd w0,w1,w2,w3
+        (0x1b02_8c20, 2, 4, 0xffff_ffff, NZCV), // msub w0,w1,w2,w3
+        (0x1b02_fc20, 2, 3, 0xffff_fffa, NZCV), // mneg w0,w1,w2
         (0x9b02_0c20, 2, 3, 0x27d0_8e36_0000_000d, NZCV), // madd x0,x1,x2,x3
         (0x9b02_8c20, 2, 3, 0xd82f_71ca_0000_0001, NZCV), // msub x0,x1,x2,x3
         (0xaa02_8020, 3, 1, 0xabcd_1235_0000_0003, NZCV), // orr x0,x1,x2,lsl #32
         (0x2a82_07e0, 0, 0x8000_0000, 0xc000_0000, NZCV), // orr w0,wzr,w2,asr #1
-        (0x4ac2_0420, 2, 1, 0x8000_0002, NZCV),        // eor w0,w1,w2,ror #1
-        (0x0a42_1020, 0xff, 0xdeb0, 0xeb, NZCV),       // and w0,w1,w2,lsr #4
-        (0x6a22_0420, 2, 1, 0, 0x4000_0000),           // bics w0,w1,w2,lsl #1
+        (0x4ac2_0420, 2, 1, 0x8000_0002, NZCV), // eor w0,w1,w2,ror #1
+        (0x0a42_1020, 0xff, 0xdeb0, 0xeb, NZCV), // and w0,w1,w2,lsr #4
+        (0x6a22_0420, 2, 1, 0, 0x4000_0000),    // bics w0,w1,w2,lsl #1
         (0xd343_fc20, 8, 0, 0x1579_a246_8000_0001, NZCV), // lsr x0,x1,#3
         (0xdac0_0020, 1, 0, 0x8000_0000_2c48_b3d5, NZCV), // rbit x0,x1
         (0x5ac0_0020, 0x8000_000f, 0, 0xf000_0001, NZCV), // rbit w0,w1
-        (0xdac0_1020, 0, 0, 0, NZCV),                  // clz x0,x1
-        (0x5ac0_1020, 0, 0, 32, NZCV),                 // clz w0,w1 with zero low word
-        (0x5ac0_1420, 0xff00_0000, 0, 7, NZCV),        // cls w0,w1 with negative low word
-        (0x5ac0_1420, 0x0400_0000, 0, 4, NZCV),        // cls w0,w1 with positive low word
+        (0xdac0_1020, 0, 0, 0, NZCV),           // clz x0,x1
+        (0x5ac0_1020, 0, 0, 32, NZCV),          // clz w0,w1 with zero low word
+        (0x5ac0_1420, 0xff00_0000, 0, 7, NZCV), // cls w0,w1 with negative low word
+        (0x5ac0_1420, 0x0400_0000, 0, 4, NZCV), // cls w0,w1 with positive low word
         (0x9ac2_2020, 1, 65, 0x579a_2468_0000_0002, NZCV), // lsl x0,x1,x2 (count wraps to 1)
         (0x1ac2_2420, 0x8000_0000, 33, 0x4000_0000, NZCV), // lsr w0,w1,w2
         (0x1ac2_2820, 0x8000_0000, 33, 0xc000_0000, NZCV), // asr w0,w1,w2
-        (0x1ac2_2c20, 1, 33, 0x8000_0000, NZCV),       // ror w0,w1,w2
+        (0x1ac2_2c20, 1, 33, 0x8000_0000, NZCV), // ror w0,w1,w2
         (0x5318_5c20, 0x1234_5678, 0, 0x3456_7800, NZCV), // lsl w0,w1,#8
         (0x1304_7c20, 0x8123_4567, 0, 0xf812_3456, NZCV), // asr w0,w1,#4
-        (0x9340_1c20, 0x80, 0, u64::MAX - 127, NZCV),  // sxtb x0,w1
-        (0x1318_1c20, 0x80, 0, 0xffff_8000, NZCV),     // sbfiz w0,w1,#8,#8
-        (0x5308_3c20, 0x1234, 0, 0x12, NZCV),          // ubfx w0,w1,#8,#8
-        (0x3318_1c20, 0x1234, 0, 0xffff_34ff, NZCV),   // bfi w0,w1,#8,#8
-        (0x3308_3c20, 0x1234, 0, 0xffff_ff12, NZCV),   // bfxil w0,w1,#8,#8
+        (0x9340_1c20, 0x80, 0, u64::MAX - 127, NZCV), // sxtb x0,w1
+        (0x1318_1c20, 0x80, 0, 0xffff_8000, NZCV), // sbfiz w0,w1,#8,#8
+        (0x5308_3c20, 0x1234, 0, 0x12, NZCV),   // ubfx w0,w1,#8,#8
+        (0x3318_1c20, 0x1234, 0, 0xffff_34ff, NZCV), // bfi w0,w1,#8,#8
+        (0x3308_3c20, 0x1234, 0, 0xffff_ff12, NZCV), // bfxil w0,w1,#8,#8
     ] {
         let (mut memory, mut thread) = memory_and_thread(&[word], Protection::ReadWrite);
         let CpuState::AArch64(cpu) = &mut thread.cpu else {
@@ -580,6 +583,51 @@ fn test_branches_use_the_selected_register_width_and_bit() {
 fn register_pairs_transfer_contiguous_values_and_guard_the_whole_span() {
     check_register_pair([0x293f_8820, 0x297f_9023], 4); // stp/ldp with W registers and #-4
     check_register_pair([0xa93f_8820, 0xa97f_9023], 8); // stp/ldp with X registers and #-8
+}
+
+#[test]
+fn indirect_branch_with_link_uses_the_original_destination() {
+    for (word, destination, link) in [
+        (0xd61f_0120, DATA, false),            // br x9
+        (0xd63f_03c0, Addr(DATA.0 + 4), true), // blr x30
+        (0xd61f_03e0, Addr(0), false),         // br xzr
+    ] {
+        let (mut memory, mut thread) = memory_and_thread(&[word], Protection::ReadWrite);
+        let CpuState::AArch64(cpu) = &mut thread.cpu else {
+            unreachable!()
+        };
+        cpu.x[9] = DATA.0;
+        cpu.x[30] = DATA.0 + 4;
+        let original = thread.clone();
+        let exit = RawInterpreter::new(&target(), &mut memory, &mut ())
+            .unwrap()
+            .step(&mut thread)
+            .unwrap();
+        assert_eq!(exit, ExitReason::Dispatch(destination));
+        assert_eq!(
+            state(&thread).x[30],
+            if link {
+                CODE.0 + 4
+            } else {
+                state(&original).x[30]
+            }
+        );
+        #[cfg(all(
+            feature = "jit-cranelift",
+            any(target_arch = "x86_64", target_arch = "aarch64"),
+            any(target_os = "linux", target_os = "windows")
+        ))]
+        {
+            use bifrost_runtime::raw::{RawJit, SystemJitMemory};
+            let mut jitted = original;
+            let actual = RawJit::new(&target(), &mut memory, &mut (), SystemJitMemory)
+                .unwrap()
+                .step(&mut jitted)
+                .unwrap();
+            assert_eq!(actual, exit);
+            assert_eq!(jitted, thread);
+        }
+    }
 }
 
 #[test]
