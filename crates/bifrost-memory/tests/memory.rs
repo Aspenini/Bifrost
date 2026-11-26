@@ -47,6 +47,47 @@ fn region_queries_follow_current_protection_and_unmapped_gaps() {
 }
 
 #[test]
+fn permission_locks_split_regions_and_prevent_partial_reprotection() {
+    let mut memory = AddressSpace::new(4096, 2).unwrap();
+    let start = Addr(0x1000);
+    let locked = Addr(0x2000);
+    memory.map(start, 8192, Protection::ReadWrite).unwrap();
+    memory.set_permission_lock(locked, 4096, true).unwrap();
+    assert_eq!(memory.region_at(start).end, Some(locked));
+    assert!(memory.permission_locked_at(locked));
+    assert_eq!(
+        memory.protect(start, 8192, Protection::Read),
+        Err(MemoryError::PermissionLocked(locked))
+    );
+    memory.write(start, &[42]).unwrap();
+    memory.set_permission_lock(locked, 4096, false).unwrap();
+    memory.protect(start, 8192, Protection::Read).unwrap();
+    assert!(!memory.permission_locked_at(locked));
+    assert!(memory.write(start, &[0]).is_err());
+}
+
+#[test]
+fn demand_zero_pages_preserve_untouched_bytes_and_generations() {
+    let mut memory = AddressSpace::new(4096, 3).unwrap();
+    let start = Addr(0x1000);
+    memory.map(start, 8192, Protection::ReadWrite).unwrap();
+    let edge = Addr(0x1fff);
+    let mut data = [0xff; 4];
+    memory.read(Addr(edge.0 - 1), &mut data).unwrap();
+    assert_eq!(data, [0; 4]);
+    let before = memory.generation_at(start);
+    memory.write(edge, &[0, 0]).unwrap();
+    assert!(memory.generation_at(start) > before);
+    memory.write(edge, &[12, 34]).unwrap();
+    memory.read(Addr(edge.0 - 1), &mut data).unwrap();
+    assert_eq!(data, [0, 12, 34, 0]);
+    memory.unmap(start, 8192).unwrap();
+    memory.map(start, 8192, Protection::ReadWrite).unwrap();
+    memory.read(Addr(edge.0 - 1), &mut data).unwrap();
+    assert_eq!(data, [0; 4]);
+}
+
+#[test]
 fn page_loans_preserve_contents_and_allow_partial_returns_at_the_page_limit() {
     let source = Addr(0x1000);
     let destination = Addr(0x4000);

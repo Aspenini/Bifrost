@@ -116,6 +116,7 @@ pub enum MemoryError {
     Unmapped(GuestAddress),
     AlreadyMapped(GuestAddress),
     InvalidPageLoan(GuestAddress),
+    PermissionLocked(GuestAddress),
     Denied {
         address: GuestAddress,
         access: AccessKind,
@@ -142,6 +143,9 @@ impl fmt::Display for MemoryError {
             }
             Self::InvalidPageLoan(address) => {
                 write!(f, "invalid guest page loan at {:#x}", address.0)
+            }
+            Self::PermissionLocked(address) => {
+                write!(f, "guest page permissions are locked at {:#x}", address.0)
             }
             Self::Denied {
                 address,

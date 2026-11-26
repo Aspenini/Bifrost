@@ -26,10 +26,12 @@ const fn permits(protection: Protection, access: AccessKind) -> bool {
 }
 
 struct Page {
+    // Empty until a write materializes this zero-filled page.
     bytes: Vec<u8>,
     protection: Protection,
     generation: u64,
     loan: Option<PageLoan>,
+    permission_locked: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -98,7 +100,8 @@ impl AddressSpace {
         self.page_size
     }
 
-    /// The number of pages with backing storage, including guard pages.
+    /// The number of committed guest pages, including zero-filled and guard pages.
+    /// A lent page counts once.
     pub fn mapped_pages(&self) -> usize {
         self.pages.len() - self.loaned_pages
     }
@@ -120,6 +123,12 @@ impl AddressSpace {
 
     pub fn page_loan_at(&self, address: GuestAddress) -> Option<PageLoan> {
         self.pages.get(&self.page_base(address.0))?.loan
+    }
+
+    pub fn permission_locked_at(&self, address: GuestAddress) -> bool {
+        self.pages
+            .get(&self.page_base(address.0))
+            .is_some_and(|page| page.permission_locked)
     }
 
     /// Returns the maximal contiguous interval with the page's current protection.
@@ -147,6 +156,7 @@ impl AddressSpace {
         };
         let same_mapping = |other: &Page| {
             other.protection == page.protection
+                && other.permission_locked == page.permission_locked
                 && other.loan.as_ref().map(std::mem::discriminant)
                     == page.loan.as_ref().map(std::mem::discriminant)
         };
@@ -227,27 +237,18 @@ impl AddressSpace {
             }
         }
         let generation = self.next_generation()?;
-        let mut staged = Vec::new();
-        staged
-            .try_reserve_exact(count)
-            .map_err(|_| MemoryError::Allocation)?;
         for base in bases {
-            let mut bytes = Vec::new();
-            bytes
-                .try_reserve_exact(self.page_size)
-                .map_err(|_| MemoryError::Allocation)?;
-            bytes.resize(self.page_size, 0);
-            staged.push((
+            self.pages.insert(
                 base,
                 Page {
-                    bytes,
+                    bytes: Vec::new(),
                     protection: protection(base),
                     generation,
                     loan: None,
+                    permission_locked: false,
                 },
-            ));
+            );
         }
-        self.pages.extend(staged);
         self.generation = generation;
         Ok(())
     }
@@ -268,7 +269,10 @@ impl AddressSpace {
                 .pages
                 .get(&from)
                 .ok_or(MemoryError::Unmapped(GuestAddress(from)))?;
-            if page.protection != Protection::ReadWrite || page.loan.is_some() {
+            if page.protection != Protection::ReadWrite
+                || page.loan.is_some()
+                || page.permission_locked
+            {
                 return Err(MemoryError::InvalidPageLoan(GuestAddress(from)));
             }
             if self.pages.contains_key(&to) {
@@ -291,6 +295,7 @@ impl AddressSpace {
                     loan: Some(PageLoan::Destination {
                         source: GuestAddress(from),
                     }),
+                    permission_locked: false,
                 },
             );
             self.loaned_pages += 1;
@@ -340,6 +345,11 @@ impl AddressSpace {
     ) -> Result<(), MemoryError> {
         let bases = self.region(start, len)?;
         self.check_mapped(bases.clone())?;
+        for base in bases.clone() {
+            if self.pages[&base].permission_locked {
+                return Err(MemoryError::PermissionLocked(GuestAddress(base)));
+            }
+        }
         let generation = self.next_generation()?;
         for base in bases {
             let page = self.pages.get_mut(&base).expect("validated mapped page");
@@ -347,6 +357,24 @@ impl AddressSpace {
             page.generation = generation;
         }
         self.generation = generation;
+        Ok(())
+    }
+
+    /// Lock or unlock permission changes without altering access to the range.
+    pub fn set_permission_lock(
+        &mut self,
+        start: GuestAddress,
+        len: u64,
+        locked: bool,
+    ) -> Result<(), MemoryError> {
+        let bases = self.region(start, len)?;
+        self.check_mapped(bases.clone())?;
+        for base in bases {
+            self.pages
+                .get_mut(&base)
+                .expect("validated mapped page")
+                .permission_locked = locked;
+        }
         Ok(())
     }
 
@@ -455,8 +483,13 @@ impl AddressSpace {
     ) -> Result<(), MemoryError> {
         self.validate(address, output.len(), access)?;
         for (base, offset, done, count) in self.chunks(address, output.len())? {
-            output[done..done + count]
-                .copy_from_slice(&self.pages[&base].bytes[offset..offset + count]);
+            let bytes = &self.pages[&base].bytes;
+            let output = &mut output[done..done + count];
+            if bytes.is_empty() {
+                output.fill(0);
+            } else {
+                output.copy_from_slice(&bytes[offset..offset + count]);
+            }
         }
         Ok(())
     }
@@ -483,9 +516,32 @@ impl GuestMemory for AddressSpace {
             return Ok(());
         }
         let generation = self.next_generation()?;
+        let mut new_pages = Vec::new();
+        for (base, _, done, count) in self.chunks(address, bytes.len())? {
+            if self.pages[&base].bytes.is_empty()
+                && bytes[done..done + count].iter().any(|&byte| byte != 0)
+            {
+                let mut page = Vec::new();
+                page.try_reserve_exact(self.page_size)
+                    .map_err(|_| MemoryError::Allocation)?;
+                page.resize(self.page_size, 0);
+                new_pages
+                    .try_reserve(1)
+                    .map_err(|_| MemoryError::Allocation)?;
+                new_pages.push((base, page));
+            }
+        }
+        for (base, bytes) in new_pages {
+            self.pages
+                .get_mut(&base)
+                .expect("validated writable page")
+                .bytes = bytes;
+        }
         for (base, offset, done, count) in self.chunks(address, bytes.len())? {
             let page = self.pages.get_mut(&base).expect("validated writable page");
-            page.bytes[offset..offset + count].copy_from_slice(&bytes[done..done + count]);
+            if !page.bytes.is_empty() {
+                page.bytes[offset..offset + count].copy_from_slice(&bytes[done..done + count]);
+            }
             page.generation = generation;
         }
         self.generation = generation;
