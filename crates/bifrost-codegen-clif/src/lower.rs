@@ -37,6 +37,7 @@ pub(crate) const DIV_SIGNED: u32 = 2 << 18;
 pub(crate) const MEMORY_WRITE: u32 = 1 << 17;
 pub(crate) const MEMORY_COMPARE_EXCHANGE: u32 = 1 << 20;
 pub(crate) const MEMORY_ATOMIC_ADD: u32 = 1 << 21;
+pub(crate) const MEMORY_VECTOR: u32 = 1 << 22;
 
 pub(crate) fn into_function(
     function: &mut Function,
@@ -90,7 +91,7 @@ pub(crate) fn into_function(
     Ok(())
 }
 
-/// Scalar values use I64 with unused upper bits cleared. Vectors use I8X16.
+/// Scalar values use I64 with unused upper bits cleared. Vectors use I64X2.
 #[derive(Clone, Copy)]
 struct Scalar {
     value: Value,
@@ -249,6 +250,18 @@ impl Lowering<'_> {
                 }
                 (out, self.values[&value].value, width)
             }
+            Op::VectorLow { out, value, ty } => {
+                let low = self.builder.ins().extractlane(self.values[&value].value, 0);
+                (out, low, ty.bit_width())
+            }
+            Op::VectorFromLow { out, value } => {
+                let value = self
+                    .builder
+                    .ins()
+                    .scalar_to_vector(types::I64X2, self.values[&value].value);
+                self.values.insert(out, Scalar { value, width: 128 });
+                return Ok(());
+            }
             Op::CheckTarget {
                 address,
                 when,
@@ -329,6 +342,13 @@ impl Lowering<'_> {
                 return Ok(());
             }
             Op::Load { out, guard, layout } => {
+                if layout.ty == Type::V128 {
+                    let zero = self.immediate(0);
+                    self.memory_access(guard, zero, layout, MEMORY_VECTOR)?;
+                    let value = self.load_vector(self.frame, HELPER_VECTORS);
+                    self.values.insert(out, Scalar { value, width: 128 });
+                    return Ok(());
+                }
                 if layout.ty.bit_width() > 64 {
                     return Err(self.unsupported("memory width"));
                 }
@@ -342,6 +362,11 @@ impl Lowering<'_> {
                 value,
                 layout,
             } => {
+                if layout.ty == Type::V128 {
+                    self.store_vector(self.frame, HELPER_VECTORS, self.values[&value].value);
+                    let zero = self.immediate(0);
+                    return self.memory_access(guard, zero, layout, MEMORY_WRITE | MEMORY_VECTOR);
+                }
                 if layout.ty.bit_width() > 64 {
                     return Err(self.unsupported("memory width"));
                 }
@@ -414,7 +439,7 @@ impl Lowering<'_> {
                 guard,
             } => {
                 let zero = self.immediate(0);
-                self.memory_access(guard, zero, MemoryLayout::V128_PAIR_LE, 0)?;
+                self.memory_access(guard, zero, MemoryLayout::V128_PAIR_LE, MEMORY_VECTOR)?;
                 for (out, offset) in [(first, HELPER_VECTORS), (second, HELPER_VECTORS + 16)] {
                     let value = self.load_vector(self.frame, offset);
                     self.values.insert(out, Scalar { value, width: 128 });
@@ -429,7 +454,12 @@ impl Lowering<'_> {
                 self.store_vector(self.frame, HELPER_VECTORS, self.values[&first].value);
                 self.store_vector(self.frame, HELPER_VECTORS + 16, self.values[&second].value);
                 let zero = self.immediate(0);
-                return self.memory_access(guard, zero, MemoryLayout::V128_PAIR_LE, MEMORY_WRITE);
+                return self.memory_access(
+                    guard,
+                    zero,
+                    MemoryLayout::V128_PAIR_LE,
+                    MEMORY_WRITE | MEMORY_VECTOR,
+                );
             }
             _ => return Err(self.unsupported("IR operation")),
         };
@@ -564,7 +594,7 @@ impl Lowering<'_> {
         // Both supported JIT hosts are little-endian. The frame buffers are
         // live for the call, but their addresses need not be vector-aligned.
         self.builder.ins().load(
-            types::I8X16,
+            types::I64X2,
             MemFlagsData::new().with_notrap(),
             base,
             offset,

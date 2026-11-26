@@ -101,6 +101,8 @@ pub(crate) fn instruction(
             }
             return Ok(());
         }
+        Op::VectorLow { out, value, ty } => (out, Value::new(ty, data(locals, value).bits)),
+        Op::VectorFromLow { out, value } => (out, Value::new(Type::V128, data(locals, value).bits)),
         Op::ReadRegister { out, register } => (out, Value::read(&thread.cpu, register)),
         Op::WriteRegister { register, value } => {
             data(locals, value).write(&mut thread.cpu, register);

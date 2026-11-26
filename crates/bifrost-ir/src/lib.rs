@@ -283,6 +283,17 @@ pub enum Op {
         value: ValueId,
         ty: Type,
     },
+    /// Take the least significant bits of a V128 value as a scalar integer.
+    VectorLow {
+        out: ValueId,
+        value: ValueId,
+        ty: Type,
+    },
+    /// Put a scalar integer in the low bits of a zero-filled V128 value.
+    VectorFromLow {
+        out: ValueId,
+        value: ValueId,
+    },
     /// Checks an instruction target before committing effects, optionally only on a taken edge.
     CheckTarget {
         address: ValueId,

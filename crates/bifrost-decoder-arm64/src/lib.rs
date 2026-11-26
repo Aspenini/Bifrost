@@ -283,10 +283,30 @@ pub enum Operation {
     VectorPair {
         first: u8,
         second: u8,
+        size_log2: u8,
         base: Reg,
         offset: u64,
         load: bool,
         addressing: PairAddressing,
+    },
+    VectorMemory {
+        reg: u8,
+        base: Reg,
+        offset: u64,
+        size_log2: u8,
+        load: bool,
+        addressing: PairAddressing,
+    },
+    MoveVectorBits {
+        integer: Reg,
+        vector: u8,
+        to_vector: bool,
+        word: bool,
+    },
+    MoveFloatImmediate {
+        vector: u8,
+        immediate: u8,
+        double: bool,
     },
     Branch {
         target: GuestAddress,
@@ -595,6 +615,29 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
     }
     if let Some(operation) = pointer_auth(word) {
         return Operation::PointerAuth(operation);
+    }
+    if matches!(
+        word & 0xffff_fc00,
+        0x1e26_0000 | 0x1e27_0000 | 0x9e66_0000 | 0x9e67_0000
+    ) {
+        let to_vector = word & (1 << 16) != 0;
+        return Operation::MoveVectorBits {
+            integer: if to_vector { lhs } else { dst },
+            vector: if to_vector {
+                (word & 31) as u8
+            } else {
+                ((word >> 5) & 31) as u8
+            },
+            to_vector,
+            word: word >> 31 == 0,
+        };
+    }
+    if word & 0xffa0_1fe0 == 0x1e20_1000 {
+        return Operation::MoveFloatImmediate {
+            vector: (word & 31) as u8,
+            immediate: ((word >> 13) & 255) as u8,
+            double: word & (1 << 22) != 0,
+        };
     }
     match word & !31 {
         kind @ (0xd53b_e000 | 0xd53b_e020 | 0xd53b_e040) => {
@@ -926,6 +969,37 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
         };
     }
     let mode = (word >> 10) & 3;
+    let vector_scaled = word & 0x3f00_0000 == 0x3d00_0000;
+    if vector_scaled || word & 0x3f20_0000 == 0x3c00_0000 {
+        let size = word >> 30;
+        let quad = word & (1 << 23) != 0;
+        if quad && size != 0 {
+            return Operation::Undefined;
+        }
+        let size_log2 = if quad { 4 } else { size as u8 };
+        let (offset, addressing) = if vector_scaled {
+            (
+                u64::from((word >> 10) & 0xfff) << size_log2,
+                PairAddressing::Offset,
+            )
+        } else {
+            let addressing = match mode {
+                0 => PairAddressing::Offset,
+                1 => PairAddressing::PostIndex,
+                3 => PairAddressing::PreIndex,
+                _ => return Operation::Unsupported,
+            };
+            (sign_extend(word >> 12, 9) as u64, addressing)
+        };
+        return Operation::VectorMemory {
+            reg: (word & 31) as u8,
+            base,
+            offset,
+            size_log2,
+            load: word & (1 << 22) != 0,
+            addressing,
+        };
+    }
     if matches!(mode, 1 | 3) && word & 0x3fa0_0000 == 0x3800_0000 {
         if dst == base {
             return Operation::Unsupported;
@@ -996,7 +1070,7 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
             },
         };
     }
-    if matches!(word & 0x7e00_0000, 0x2800_0000 | 0x2c00_0000) {
+    if word & 0x7e00_0000 == 0x2800_0000 || word & 0x3e00_0000 == 0x2c00_0000 {
         let addressing = match (word >> 23) & 3 {
             1 => PairAddressing::PostIndex,
             2 => PairAddressing::Offset,
@@ -1008,14 +1082,16 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
         if word & (1 << 26) != 0 {
             let first = (word & 31) as u8;
             let second = ((word >> 10) & 31) as u8;
-            if word >> 30 != 2 || (load && first == second) {
+            let size_log2 = (word >> 30) as u8 + 2;
+            if size_log2 > 4 || (load && first == second) {
                 return Operation::Unsupported;
             }
             return Operation::VectorPair {
                 first,
                 second,
+                size_log2,
                 base,
-                offset: (imm * 16) as u64,
+                offset: (imm << size_log2) as u64,
                 load,
                 addressing,
             };

@@ -132,6 +132,94 @@ fn reports_precise_fetch_and_data_faults_and_rejects_unsupported_instructions() 
 }
 
 #[test]
+fn scalar_and_vector_transfers_preserve_bits_and_clear_unused_lanes() {
+    let words = [
+        0xfd40_0420, // ldr d0,[x1,#8]
+        0xbd00_1420, // str s0,[x1,#20]
+        0x3cc2_0022, // ldur q2,[x1,#32]
+        0x6d42_1c26, // ldp d6,d7,[x1,#32]
+        0x2d08_1c26, // stp s6,s7,[x1,#64]
+        0x2d48_2c2a, // ldp s10,s11,[x1,#64]
+        0x9e66_0008, // fmov x8,d0
+        0x1e27_0104, // fmov s4,w8
+        0x1e7f_1003, // fmov d3,#-1.5
+        0x1e20_1005, // fmov s5,#2.0
+        0x3c83_0c22, // str q2,[x1,#48]!
+    ];
+    let execute = |#[allow(unused_variables)] jit: bool| {
+        let (mut memory, mut thread) = memory_and_thread(&words, Protection::ReadWrite);
+        let value = 0x1234_5678_dead_beef_u64;
+        let lanes = 0xdead_face_cafe_beef_8765_4321_0123_4567_u128;
+        memory
+            .write(Addr(DATA.0 + 8), &value.to_le_bytes())
+            .unwrap();
+        memory
+            .write(Addr(DATA.0 + 32), &lanes.to_le_bytes())
+            .unwrap();
+        let CpuState::AArch64(cpu) = &mut thread.cpu else {
+            unreachable!()
+        };
+        cpu.v.fill(u128::MAX);
+        let budget = ExecutionBudget {
+            instructions: words.len() as u64,
+        };
+        let run_interpreter = |memory: &mut AddressSpace, thread: &mut GuestThread| {
+            RawInterpreter::new(&target(), memory, &mut ())
+                .unwrap()
+                .run(thread, budget)
+                .unwrap()
+        };
+        #[cfg(all(
+            feature = "jit-cranelift",
+            any(target_arch = "x86_64", target_arch = "aarch64"),
+            any(target_os = "linux", target_os = "windows")
+        ))]
+        let stop = if jit {
+            use bifrost_runtime::raw::{RawJit, SystemJitMemory};
+            RawJit::new(&target(), &mut memory, &mut (), SystemJitMemory)
+                .unwrap()
+                .run(&mut thread, budget)
+                .unwrap()
+        } else {
+            run_interpreter(&mut memory, &mut thread)
+        };
+        #[cfg(not(all(
+            feature = "jit-cranelift",
+            any(target_arch = "x86_64", target_arch = "aarch64"),
+            any(target_os = "linux", target_os = "windows")
+        )))]
+        let stop = run_interpreter(&mut memory, &mut thread);
+
+        assert_eq!(stop, ExitReason::BudgetExhausted);
+        let cpu = state(&thread);
+        assert_eq!(cpu.x[1], DATA.0 + 48);
+        assert_eq!(cpu.x[8], value);
+        assert_eq!(cpu.v[0], u128::from(value));
+        assert_eq!(cpu.v[2], lanes);
+        assert_eq!(cpu.v[3], u128::from((-1.5f64).to_bits()));
+        assert_eq!(cpu.v[4], u128::from(value as u32));
+        assert_eq!(cpu.v[5], u128::from(2f32.to_bits()));
+        assert_eq!(cpu.v[6], u128::from(lanes as u64));
+        assert_eq!(cpu.v[7], lanes >> 64);
+        assert_eq!(cpu.v[10], u128::from(lanes as u32));
+        assert_eq!(cpu.v[11], u128::from((lanes >> 64) as u32));
+        let mut scalar = [0; 4];
+        memory.read(Addr(DATA.0 + 20), &mut scalar).unwrap();
+        assert_eq!(scalar, (value as u32).to_le_bytes());
+        let mut vector = [0; 16];
+        memory.read(Addr(DATA.0 + 48), &mut vector).unwrap();
+        assert_eq!(vector, lanes.to_le_bytes());
+    };
+    execute(false);
+    #[cfg(all(
+        feature = "jit-cranelift",
+        any(target_arch = "x86_64", target_arch = "aarch64"),
+        any(target_os = "linux", target_os = "windows")
+    ))]
+    execute(true);
+}
+
+#[test]
 fn vector_pair_transfers_preserve_all_bits_and_fault_before_writeback() {
     let execute = |#[allow(unused_variables)] jit: bool, crossing_page: bool| {
         let words = if crossing_page {

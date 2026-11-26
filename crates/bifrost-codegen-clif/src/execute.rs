@@ -316,12 +316,19 @@ impl MemoryContext<'_> {
         )?;
 
         let width = usize::from(width.get());
-        if width == vectors.len() {
+        if options & lower::MEMORY_VECTOR != 0 {
+            let data = &mut vectors[..width];
+            if write && big_endian {
+                data.reverse();
+            }
             let result = if write {
-                self.memory.write(address, vectors)
+                self.memory.write(address, data)
             } else {
-                self.memory.read(address, vectors)
+                self.memory.read(address, data)
             };
+            if !write && big_endian {
+                data.reverse();
+            }
             return result
                 .map(|()| 0)
                 .map_err(|error| self.access_error(access, error));

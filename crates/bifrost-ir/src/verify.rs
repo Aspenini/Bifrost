@@ -344,6 +344,20 @@ impl Values {
                 }
                 (out, ty)
             }
+            Op::VectorLow { out, value, ty } => {
+                self.expect(value, Type::V128)?;
+                if !matches!(ty, Type::I8 | Type::I16 | Type::I32 | Type::I64) {
+                    return Err(VerifyErrorKind::InvalidValueType(ty));
+                }
+                (out, ty)
+            }
+            Op::VectorFromLow { out, value } => {
+                let ty = self.data(value)?;
+                if !matches!(ty, Type::I8 | Type::I16 | Type::I32 | Type::I64) {
+                    return Err(VerifyErrorKind::InvalidValueType(ty));
+                }
+                (out, Type::V128)
+            }
             Op::CheckTarget { address, when, .. } => {
                 self.expect(address, Type::GuestAddress)?;
                 return match when {

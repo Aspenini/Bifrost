@@ -16,7 +16,8 @@ The raw profile uses little-endian A64 instructions and serialized execution ove
 | Conditional compare | 32-bit and 64-bit CCMP and CCMN with a register or immediate |
 | Memory | 32-bit and 64-bit unsigned scaled immediate and signed pre/post-indexed LDR/STR, signed unscaled immediate LDUR/STUR, unsigned immediate LDRB/STRB, and signed unscaled immediate LDURB/STURB with Xn or SP base |
 | Register-offset memory | Unsigned byte, halfword, word and doubleword loads and stores with Xn or SP base and UXTW, SXTW, SXTX or LSL offset |
-| Paired memory | 32-bit and 64-bit general-purpose pairs and 128-bit SIMD pairs. Supports signed-offset, pre-index and post-index forms with an Xn or SP base and distinct LDP destinations. |
+| Paired memory | 32-bit and 64-bit general-purpose pairs and 32-bit, 64-bit and 128-bit SIMD pairs. Supports signed-offset, pre-index and post-index forms with an Xn or SP base and distinct LDP destinations. |
+| SIMD scalar and vector transfers | B, H, S, D and Q loads and stores with scaled or unscaled immediate offsets, including pre-index and post-index writeback. FMOV supports S/D immediates and bit transfers between W/S or X/D registers. |
 | Branch | B, BL, B.cond, BR, BLR, 32-bit and 64-bit CBZ/CBNZ, TBZ/TBNZ, RET Xn |
 | Miscellaneous | NOP, DMB ISH, UDF |
 | Supervisor call | SVC with a 16-bit immediate, reported to the caller as an execution exit |

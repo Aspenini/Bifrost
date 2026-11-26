@@ -576,9 +576,116 @@ impl Arm64Lifter {
                 ir.access_scalar(reg, address, MemoryLayout { ty, ..QWORD }, load);
                 ir.next(next)
             }
+            Operation::MoveFloatImmediate {
+                vector,
+                immediate,
+                double,
+            } => {
+                let (ty, exponent_width, fraction_width) = if double {
+                    (Type::I64, 11, 52)
+                } else {
+                    (Type::I32, 8, 23)
+                };
+                let selector = u128::from((immediate >> 6) & 1);
+                let exponent = ((selector ^ 1) << (exponent_width - 1))
+                    | ((selector * ((1 << (exponent_width - 3)) - 1)) << 2)
+                    | u128::from((immediate >> 4) & 3);
+                let bits = (u128::from(immediate >> 7) << (exponent_width + fraction_width))
+                    | (exponent << fraction_width)
+                    | (u128::from(immediate & 15) << (fraction_width - 4));
+                let value = ir.value(|out| Op::Const { out, ty, bits });
+                let value = ir.value(|out| Op::VectorFromLow { out, value });
+                ir.emit(Op::WriteRegister {
+                    register: Register::Arm64(Arm64Reg::V(vector)),
+                    value,
+                });
+                ir.next(next)
+            }
+            Operation::MoveVectorBits {
+                integer,
+                vector,
+                to_vector,
+                word,
+            } => {
+                let register = Register::Arm64(Arm64Reg::V(vector));
+                let ty = if word { Type::I32 } else { Type::I64 };
+                if to_vector {
+                    let value = ir.read(integer);
+                    let value = if word { ir.cast(value, ty) } else { value };
+                    let value = ir.value(|out| Op::VectorFromLow { out, value });
+                    ir.emit(Op::WriteRegister { register, value });
+                } else {
+                    let value = ir.value(|out| Op::ReadRegister { out, register });
+                    let value = ir.value(|out| Op::VectorLow { out, value, ty });
+                    let value = if word {
+                        ir.cast(value, Type::I64)
+                    } else {
+                        value
+                    };
+                    ir.write(integer, value);
+                }
+                ir.next(next)
+            }
+            Operation::VectorMemory {
+                reg,
+                base,
+                offset,
+                size_log2,
+                load,
+                addressing,
+            } => {
+                let original = ir.memory_base(base, load);
+                let updated = ir.with_immediate(IntOp::Add, original, offset);
+                let address = ir.address(if addressing == PairAddressing::PostIndex {
+                    original
+                } else {
+                    updated
+                });
+                let access = if load {
+                    MemoryAccess::Read
+                } else {
+                    MemoryAccess::Write
+                };
+                let ty =
+                    [Type::I8, Type::I16, Type::I32, Type::I64, Type::V128][usize::from(size_log2)];
+                let layout = MemoryLayout { ty, ..QWORD };
+                let guard = ir.value(|out| Op::Guard {
+                    out,
+                    address,
+                    access,
+                    layout,
+                });
+                let register = Register::Arm64(Arm64Reg::V(reg));
+                if load {
+                    let value = ir.value(|out| Op::Load { out, guard, layout });
+                    let value = if ty == Type::V128 {
+                        value
+                    } else {
+                        ir.value(|out| Op::VectorFromLow { out, value })
+                    };
+                    ir.emit(Op::WriteRegister { register, value });
+                } else {
+                    let value = ir.value(|out| Op::ReadRegister { out, register });
+                    let value = if ty == Type::V128 {
+                        value
+                    } else {
+                        ir.value(|out| Op::VectorLow { out, value, ty })
+                    };
+                    ir.emit(Op::Store {
+                        guard,
+                        value,
+                        layout,
+                    });
+                }
+                if addressing != PairAddressing::Offset {
+                    ir.write(base, updated);
+                }
+                ir.next(next)
+            }
             Operation::VectorPair {
                 first,
                 second,
+                size_log2,
                 base,
                 offset,
                 load,
@@ -596,30 +703,51 @@ impl Arm64Lifter {
                 } else {
                     MemoryAccess::Write
                 };
+                let (ty, layout) = match size_log2 {
+                    2 => (Type::I32, QWORD),
+                    3 => (Type::I64, MemoryLayout::I64_PAIR_LE),
+                    _ => (Type::V128, MemoryLayout::V128_PAIR_LE),
+                };
                 let guard = ir.value(|out| Op::Guard {
                     out,
                     address,
                     access,
-                    layout: MemoryLayout::V128_PAIR_LE,
+                    layout,
                 });
                 let first_reg = Register::Arm64(Arm64Reg::V(first));
                 let second_reg = Register::Arm64(Arm64Reg::V(second));
                 if load {
-                    let first = ir.fresh_value();
-                    let second = ir.fresh_value();
-                    ir.emit(Op::LoadPair128 {
-                        first,
-                        second,
-                        guard,
-                    });
-                    ir.emit(Op::WriteRegister {
-                        register: first_reg,
-                        value: first,
-                    });
-                    ir.emit(Op::WriteRegister {
-                        register: second_reg,
-                        value: second,
-                    });
+                    let (first, second) = if ty == Type::I32 {
+                        let pair = ir.value(|out| Op::Load { out, guard, layout });
+                        let first = ir.cast(pair, Type::I32);
+                        let high = ir.shift_register(pair, RegisterShift::LogicalRight, 32, false);
+                        (first, ir.cast(high, Type::I32))
+                    } else {
+                        let first = ir.fresh_value();
+                        let second = ir.fresh_value();
+                        ir.emit(if ty == Type::I64 {
+                            Op::LoadPair64 {
+                                first,
+                                second,
+                                guard,
+                            }
+                        } else {
+                            Op::LoadPair128 {
+                                first,
+                                second,
+                                guard,
+                            }
+                        });
+                        (first, second)
+                    };
+                    for (register, value) in [(first_reg, first), (second_reg, second)] {
+                        let value = if ty == Type::V128 {
+                            value
+                        } else {
+                            ir.value(|out| Op::VectorFromLow { out, value })
+                        };
+                        ir.emit(Op::WriteRegister { register, value });
+                    }
                 } else {
                     let first = ir.value(|out| Op::ReadRegister {
                         out,
@@ -629,11 +757,41 @@ impl Arm64Lifter {
                         out,
                         register: second_reg,
                     });
-                    ir.emit(Op::StorePair128 {
-                        first,
-                        second,
-                        guard,
-                    });
+                    if ty == Type::V128 {
+                        ir.emit(Op::StorePair128 {
+                            first,
+                            second,
+                            guard,
+                        });
+                    } else {
+                        let first = ir.value(|out| Op::VectorLow {
+                            out,
+                            value: first,
+                            ty,
+                        });
+                        let second = ir.value(|out| Op::VectorLow {
+                            out,
+                            value: second,
+                            ty,
+                        });
+                        if ty == Type::I64 {
+                            ir.emit(Op::StorePair64 {
+                                first,
+                                second,
+                                guard,
+                            });
+                        } else {
+                            let low = ir.cast(first, Type::I64);
+                            let high = ir.cast(second, Type::I64);
+                            let high = ir.shift_register(high, RegisterShift::Left, 32, false);
+                            let value = ir.binary(IntOp::Or, low, high);
+                            ir.emit(Op::Store {
+                                guard,
+                                value,
+                                layout,
+                            });
+                        }
+                    }
                 }
                 if addressing != PairAddressing::Offset {
                     ir.write(base, updated);
