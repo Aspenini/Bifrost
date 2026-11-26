@@ -132,6 +132,84 @@ fn reports_precise_fetch_and_data_faults_and_rejects_unsupported_instructions() 
 }
 
 #[test]
+fn vector_pair_transfers_preserve_all_bits_and_fault_before_writeback() {
+    let execute = |#[allow(unused_variables)] jit: bool, crossing_page: bool| {
+        let words = if crossing_page {
+            [0xac81_1c26, 0xd503_201f] // stp q6,q7,[x1],#32; nop
+        } else {
+            [0xadbf_1fe6, 0xacc1_7fe8] // stp q6,q7,[sp,#-32]!; ldp q8,q31,[sp],#32
+        };
+        let (mut memory, mut thread) = memory_and_thread(&words, Protection::ReadWrite);
+        let end = DATA.0 + 4096;
+        let first = 0x0123_4567_89ab_cdef_fedc_ba98_7654_3210_u128;
+        let second = 0xabba_aaba_0000_0012_ffee_0042_6677_8899_u128;
+        let CpuState::AArch64(cpu) = &mut thread.cpu else {
+            unreachable!()
+        };
+        cpu.v[6] = first;
+        cpu.v[7] = second;
+        cpu.x[1] = end - 16;
+        memory.write(Addr(end - 32), &[0x55; 32]).unwrap();
+        let budget = ExecutionBudget { instructions: 2 };
+        let run_interpreter = |memory: &mut AddressSpace, thread: &mut GuestThread| {
+            RawInterpreter::new(&target(), memory, &mut ())
+                .unwrap()
+                .run(thread, budget)
+                .unwrap()
+        };
+        #[cfg(all(
+            feature = "jit-cranelift",
+            any(target_arch = "x86_64", target_arch = "aarch64"),
+            any(target_os = "linux", target_os = "windows")
+        ))]
+        let stop = if jit {
+            use bifrost_runtime::raw::{RawJit, SystemJitMemory};
+            RawJit::new(&target(), &mut memory, &mut (), SystemJitMemory)
+                .unwrap()
+                .run(&mut thread, budget)
+                .unwrap()
+        } else {
+            run_interpreter(&mut memory, &mut thread)
+        };
+        #[cfg(not(all(
+            feature = "jit-cranelift",
+            any(target_arch = "x86_64", target_arch = "aarch64"),
+            any(target_os = "linux", target_os = "windows")
+        )))]
+        let stop = run_interpreter(&mut memory, &mut thread);
+
+        let mut data = [0; 32];
+        memory.read(Addr(end - 32), &mut data).unwrap();
+        let cpu = state(&thread);
+        if crossing_page {
+            let ExitReason::Fault(fault) = stop else {
+                panic!("expected guest memory fault")
+            };
+            assert_eq!(fault.memory_access, Some((Addr(end), AccessKind::Write)));
+            assert_eq!(cpu.pc, CODE);
+            assert_eq!(cpu.x[1], end - 16);
+            assert_eq!(data, [0x55; 32]);
+        } else {
+            assert_eq!(stop, ExitReason::BudgetExhausted);
+            assert_eq!(cpu.sp, Addr(end));
+            assert_eq!(cpu.v[8], first);
+            assert_eq!(cpu.v[31], second);
+            assert_eq!(&data[..16], &first.to_le_bytes());
+            assert_eq!(&data[16..], &second.to_le_bytes());
+        }
+    };
+    for crossing_page in [false, true] {
+        execute(false, crossing_page);
+        #[cfg(all(
+            feature = "jit-cranelift",
+            any(target_arch = "x86_64", target_arch = "aarch64"),
+            any(target_os = "linux", target_os = "windows")
+        ))]
+        execute(true, crossing_page);
+    }
+}
+
+#[test]
 fn signed_immediate_loads_extend_to_the_destination_width() {
     let words = [
         0x3980_0020, // ldrsb x0,[x1]

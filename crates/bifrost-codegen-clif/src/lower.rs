@@ -14,7 +14,7 @@ use cranelift_codegen::{
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use std::collections::BTreeMap;
 
-// The frame consists only of consecutive u64 slots. The host call site owns it.
+// The host call site owns this frame for the lifetime of the generated call.
 pub(crate) const STACK: i32 = 31 * 8;
 pub(crate) const FLAGS: i32 = 32 * 8;
 pub(crate) const NEXT_PC: i32 = 33 * 8;
@@ -23,6 +23,8 @@ pub(crate) const HELPER_VALUE: i32 = 35 * 8;
 pub(crate) const HELPER_HIGH: i32 = 36 * 8;
 pub(crate) const TPIDR: i32 = 37 * 8;
 pub(crate) const TPIDRRO: i32 = 38 * 8;
+pub(crate) const VECTOR_REGISTERS: i32 = 39 * 8;
+pub(crate) const HELPER_VECTORS: i32 = 40 * 8;
 pub(crate) const DISPATCH: i64 = 0;
 pub(crate) const NONCANONICAL: i64 = 1;
 pub(crate) const ILLEGAL: i64 = 2;
@@ -88,7 +90,7 @@ pub(crate) fn into_function(
     Ok(())
 }
 
-/// Scalar values are held in I64 with unused upper bits cleared.
+/// Scalar values use I64 with unused upper bits cleared. Vectors use I8X16.
 #[derive(Clone, Copy)]
 struct Scalar {
     value: Value,
@@ -228,6 +230,9 @@ impl Lowering<'_> {
                 let flag = self.values[&condition].value;
                 let yes = self.values[&yes];
                 let no = self.values[&no].value;
+                if yes.width > 64 {
+                    return Err(self.unsupported("select width"));
+                }
                 (
                     out,
                     self.builder.ins().select(flag, yes.value, no),
@@ -294,6 +299,12 @@ impl Lowering<'_> {
                 return Ok(());
             }
             Op::ReadRegister { out, register } => {
+                if let Register::Arm64(Arm64Reg::V(index)) = register {
+                    let registers = self.load(VECTOR_REGISTERS);
+                    let value = self.load_vector(registers, i32::from(index) * 16);
+                    self.values.insert(out, Scalar { value, width: 128 });
+                    return Ok(());
+                }
                 let (offset, width) = self.register_layout(register)?;
                 let value = self.builder.ins().load(
                     types::I64,
@@ -304,6 +315,11 @@ impl Lowering<'_> {
                 (out, value, width)
             }
             Op::WriteRegister { register, value } => {
+                if let Register::Arm64(Arm64Reg::V(index)) = register {
+                    let registers = self.load(VECTOR_REGISTERS);
+                    self.store_vector(registers, i32::from(index) * 16, self.values[&value].value);
+                    return Ok(());
+                }
                 let (offset, _) = self.register_layout(register)?;
                 self.store(offset, self.values[&value].value);
                 return Ok(());
@@ -392,6 +408,29 @@ impl Lowering<'_> {
                     MEMORY_WRITE,
                 );
             }
+            Op::LoadPair128 {
+                first,
+                second,
+                guard,
+            } => {
+                let zero = self.immediate(0);
+                self.memory_access(guard, zero, MemoryLayout::V128_PAIR_LE, 0)?;
+                for (out, offset) in [(first, HELPER_VECTORS), (second, HELPER_VECTORS + 16)] {
+                    let value = self.load_vector(self.frame, offset);
+                    self.values.insert(out, Scalar { value, width: 128 });
+                }
+                return Ok(());
+            }
+            Op::StorePair128 {
+                first,
+                second,
+                guard,
+            } => {
+                self.store_vector(self.frame, HELPER_VECTORS, self.values[&first].value);
+                self.store_vector(self.frame, HELPER_VECTORS + 16, self.values[&second].value);
+                let zero = self.immediate(0);
+                return self.memory_access(guard, zero, MemoryLayout::V128_PAIR_LE, MEMORY_WRITE);
+            }
             _ => return Err(self.unsupported("IR operation")),
         };
         let value = self.mask(value, width);
@@ -413,7 +452,6 @@ impl Lowering<'_> {
         let width = layout
             .ty
             .storage_bytes()
-            .filter(|&size| size <= 16)
             .ok_or_else(|| self.unsupported("memory width"))?;
         let mut options = u32::from(width) | (u32::from(layout.alignment) << 8);
         options |= u32::from(layout.endian == Endian::Big) << 16;
@@ -520,6 +558,23 @@ impl Lowering<'_> {
         self.builder
             .ins()
             .load(types::I64, MemFlagsData::trusted(), self.frame, offset)
+    }
+
+    fn load_vector(&mut self, base: Value, offset: i32) -> Value {
+        // Both supported JIT hosts are little-endian. The frame buffers are
+        // live for the call, but their addresses need not be vector-aligned.
+        self.builder.ins().load(
+            types::I8X16,
+            MemFlagsData::new().with_notrap(),
+            base,
+            offset,
+        )
+    }
+
+    fn store_vector(&mut self, base: Value, offset: i32, value: Value) {
+        self.builder
+            .ins()
+            .store(MemFlagsData::new().with_notrap(), value, base, offset);
     }
 
     fn store(&mut self, offset: i32, value: Value) {

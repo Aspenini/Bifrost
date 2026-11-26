@@ -170,6 +170,28 @@ pub(crate) fn instruction(
             locals.insert(first, Local::Data(Value::new(Type::I64, pair)));
             (second, Value::new(Type::I64, pair >> 64))
         }
+        Op::LoadPair128 {
+            first,
+            second,
+            guard,
+        } => {
+            let address = guarded_address(locals, guard);
+            check_access(
+                pc,
+                thread,
+                address,
+                AccessKind::Read,
+                MemoryLayout::V128_PAIR_LE,
+            )?;
+            let mut bytes = [0; 32];
+            memory
+                .read(address, &mut bytes)
+                .map_err(|err| memory_error(pc, thread, AccessKind::Read, err))?;
+            let low = u128::from_le_bytes(bytes[..16].try_into().unwrap());
+            let high = u128::from_le_bytes(bytes[16..].try_into().unwrap());
+            locals.insert(first, Local::Data(Value::new(Type::V128, low)));
+            (second, Value::new(Type::V128, high))
+        }
         Op::CompareExchange {
             out,
             guard,
@@ -216,6 +238,26 @@ pub(crate) fn instruction(
             let pair = data(locals, first).bits | (data(locals, second).bits << 64);
             return memory
                 .write(address, &pair.to_le_bytes())
+                .map_err(|err| memory_error(pc, thread, AccessKind::Write, err));
+        }
+        Op::StorePair128 {
+            first,
+            second,
+            guard,
+        } => {
+            let address = guarded_address(locals, guard);
+            check_access(
+                pc,
+                thread,
+                address,
+                AccessKind::Write,
+                MemoryLayout::V128_PAIR_LE,
+            )?;
+            let mut bytes = [0; 32];
+            bytes[..16].copy_from_slice(&data(locals, first).bits.to_le_bytes());
+            bytes[16..].copy_from_slice(&data(locals, second).bits.to_le_bytes());
+            return memory
+                .write(address, &bytes)
                 .map_err(|err| memory_error(pc, thread, AccessKind::Write, err));
         }
         _ => return Err(EvalError::Backend(InterpreterError::UnsupportedIr)),

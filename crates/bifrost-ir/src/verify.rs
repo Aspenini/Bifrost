@@ -62,6 +62,7 @@ pub enum VerifyErrorKind {
     DuplicateValue(ValueId),
     UndefinedValue(ValueId),
     ExpectedData(ValueId),
+    InvalidValueType(Type),
     TypeMismatch {
         value: ValueId,
         expected: Type,
@@ -195,6 +196,9 @@ struct Values(BTreeMap<ValueId, Value>);
 
 impl Values {
     fn define(&mut self, id: ValueId, value: Value) -> Result<(), VerifyErrorKind> {
+        if matches!(value, Value::Data(Type::V128Pair)) {
+            return Err(VerifyErrorKind::InvalidValueType(Type::V128Pair));
+        }
         if self.0.insert(id, value).is_some() {
             return Err(VerifyErrorKind::DuplicateValue(id));
         }
@@ -439,6 +443,29 @@ impl Values {
                     guard,
                     MemoryAccess::Write,
                     MemoryLayout::I64_PAIR_LE,
+                    pc,
+                );
+            }
+            Op::LoadPair128 {
+                first,
+                second,
+                guard,
+            } => {
+                self.consume_guard(guard, MemoryAccess::Read, MemoryLayout::V128_PAIR_LE, pc)?;
+                self.define(first, Value::Data(Type::V128))?;
+                (second, Type::V128)
+            }
+            Op::StorePair128 {
+                first,
+                second,
+                guard,
+            } => {
+                self.expect(first, Type::V128)?;
+                self.expect(second, Type::V128)?;
+                return self.consume_guard(
+                    guard,
+                    MemoryAccess::Write,
+                    MemoryLayout::V128_PAIR_LE,
                     pc,
                 );
             }

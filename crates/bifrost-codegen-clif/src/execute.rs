@@ -24,6 +24,8 @@ struct Frame {
     helper_high: u64,
     tpidr: u64,
     tpidrro: u64,
+    vectors: u64,
+    helper_vectors: [u8; 32],
 }
 
 const _: () = {
@@ -34,6 +36,8 @@ const _: () = {
     assert!(offset_of!(Frame, helper_high) == lower::HELPER_HIGH as usize);
     assert!(offset_of!(Frame, tpidr) == lower::TPIDR as usize);
     assert!(offset_of!(Frame, tpidrro) == lower::TPIDRRO as usize);
+    assert!(offset_of!(Frame, vectors) == lower::VECTOR_REGISTERS as usize);
+    assert!(offset_of!(Frame, helper_vectors) == lower::HELPER_VECTORS as usize);
 };
 
 type Helper = unsafe extern "C" fn(*mut Frame, *mut c_void, u64, u64, u32) -> u32;
@@ -128,8 +132,10 @@ impl<Image: ExecutableImage> PublishedBlock<Image> {
             helper_high: 0,
             tpidr: 0,
             tpidrro: 0,
+            vectors: 0,
+            helper_vectors: [0; 32],
         };
-        match &thread.cpu {
+        match &mut thread.cpu {
             CpuState::X86_64(state) => {
                 frame.general[..16].copy_from_slice(&state.gpr);
                 frame.flags = state.rflags;
@@ -140,6 +146,7 @@ impl<Image: ExecutableImage> PublishedBlock<Image> {
                 frame.flags = u64::from(state.nzcv);
                 frame.tpidr = state.tpidr_el0.0;
                 frame.tpidrro = state.tpidrro_el0.0;
+                frame.vectors = state.v.as_mut_ptr() as usize as u64;
             }
             _ => return Err(ExecutionError::WrongGuestIsa),
         }
@@ -152,7 +159,8 @@ impl<Image: ExecutableImage> PublishedBlock<Image> {
         };
         // SAFETY: Only this crate can construct MachineCode. The unsafe manager contract ensures
         // its executable entry is exactly the generated code and lives for the entire call.
-        // Both ABI arguments point to live, uniquely borrowed objects for this call only.
+        // Both ABI arguments and the optional AArch64 vector pointer refer to live,
+        // uniquely borrowed storage for this call only.
         let status = unsafe {
             let entry: Entry = std::mem::transmute(self.image.entry().as_ptr());
             entry(
@@ -254,7 +262,12 @@ unsafe extern "C" fn run_helper(
     }
     let call = catch_unwind(AssertUnwindSafe(|| {
         let value = u128::from(value) | (u128::from(frame.helper_high) << 64);
-        context.access(GuestAddress(address), value, options)
+        context.access(
+            GuestAddress(address),
+            value,
+            options,
+            &mut frame.helper_vectors,
+        )
     }));
     match call {
         Ok(Ok(value)) => {
@@ -279,6 +292,7 @@ impl MemoryContext<'_> {
         address: GuestAddress,
         value: u128,
         options: u32,
+        vectors: &mut [u8; 32],
     ) -> Result<u128, HelperError> {
         let width = NonZeroU8::new(options as u8).expect("generated width is nonzero");
         let alignment =
@@ -302,6 +316,16 @@ impl MemoryContext<'_> {
         )?;
 
         let width = usize::from(width.get());
+        if width == vectors.len() {
+            let result = if write {
+                self.memory.write(address, vectors)
+            } else {
+                self.memory.read(address, vectors)
+            };
+            return result
+                .map(|()| 0)
+                .map_err(|error| self.access_error(access, error));
+        }
         let start = if big_endian { 16 - width } else { 0 };
         let range = start..start + width;
         let result = if options & lower::MEMORY_COMPARE_EXCHANGE != 0 {
@@ -329,11 +353,13 @@ impl MemoryContext<'_> {
                 }
             })
         };
-        result.map_err(
-            |error| match error.guest_fault(self.pc, self.thread, access) {
-                Some(fault) => HelperError::Guest(fault),
-                None => HelperError::Memory(error),
-            },
-        )
+        result.map_err(|error| self.access_error(access, error))
+    }
+
+    fn access_error(&self, access: AccessKind, error: MemoryError) -> HelperError {
+        match error.guest_fault(self.pc, self.thread, access) {
+            Some(fault) => HelperError::Guest(fault),
+            None => HelperError::Memory(error),
+        }
     }
 }

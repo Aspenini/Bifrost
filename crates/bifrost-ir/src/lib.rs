@@ -37,6 +37,8 @@ pub enum Type {
     F64,
     V64,
     V128,
+    /// A memory layout for two vectors. It cannot be used as an SSA value.
+    V128Pair,
     GuestAddress,
 }
 
@@ -49,6 +51,7 @@ impl Type {
             Self::I32 | Self::F32 => 32,
             Self::I64 | Self::F64 | Self::V64 | Self::GuestAddress => 64,
             Self::I128 | Self::V128 => 128,
+            Self::V128Pair => 256,
         }
     }
 
@@ -214,6 +217,11 @@ impl MemoryLayout {
         alignment: 1,
         endian: Endian::Little,
     };
+    pub const V128_PAIR_LE: Self = Self {
+        ty: Type::V128Pair,
+        alignment: 1,
+        endian: Endian::Little,
+    };
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -333,6 +341,16 @@ pub enum Op {
     },
     /// Write two little-endian scalar values as one contiguous 16-byte range.
     StorePair64 {
+        first: ValueId,
+        second: ValueId,
+        guard: ValueId,
+    },
+    LoadPair128 {
+        first: ValueId,
+        second: ValueId,
+        guard: ValueId,
+    },
+    StorePair128 {
         first: ValueId,
         second: ValueId,
         guard: ValueId,

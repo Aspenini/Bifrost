@@ -576,6 +576,70 @@ impl Arm64Lifter {
                 ir.access_scalar(reg, address, MemoryLayout { ty, ..QWORD }, load);
                 ir.next(next)
             }
+            Operation::VectorPair {
+                first,
+                second,
+                base,
+                offset,
+                load,
+                addressing,
+            } => {
+                let original = ir.memory_base(base, load);
+                let updated = ir.with_immediate(IntOp::Add, original, offset);
+                let address = ir.address(if addressing == PairAddressing::PostIndex {
+                    original
+                } else {
+                    updated
+                });
+                let access = if load {
+                    MemoryAccess::Read
+                } else {
+                    MemoryAccess::Write
+                };
+                let guard = ir.value(|out| Op::Guard {
+                    out,
+                    address,
+                    access,
+                    layout: MemoryLayout::V128_PAIR_LE,
+                });
+                let first_reg = Register::Arm64(Arm64Reg::V(first));
+                let second_reg = Register::Arm64(Arm64Reg::V(second));
+                if load {
+                    let first = ir.fresh_value();
+                    let second = ir.fresh_value();
+                    ir.emit(Op::LoadPair128 {
+                        first,
+                        second,
+                        guard,
+                    });
+                    ir.emit(Op::WriteRegister {
+                        register: first_reg,
+                        value: first,
+                    });
+                    ir.emit(Op::WriteRegister {
+                        register: second_reg,
+                        value: second,
+                    });
+                } else {
+                    let first = ir.value(|out| Op::ReadRegister {
+                        out,
+                        register: first_reg,
+                    });
+                    let second = ir.value(|out| Op::ReadRegister {
+                        out,
+                        register: second_reg,
+                    });
+                    ir.emit(Op::StorePair128 {
+                        first,
+                        second,
+                        guard,
+                    });
+                }
+                if addressing != PairAddressing::Offset {
+                    ir.write(base, updated);
+                }
+                ir.next(next)
+            }
             Operation::WordPair {
                 first,
                 second,

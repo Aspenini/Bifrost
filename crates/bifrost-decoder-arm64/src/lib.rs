@@ -280,6 +280,14 @@ pub enum Operation {
         load: bool,
         addressing: PairAddressing,
     },
+    VectorPair {
+        first: u8,
+        second: u8,
+        base: Reg,
+        offset: u64,
+        load: bool,
+        addressing: PairAddressing,
+    },
     Branch {
         target: GuestAddress,
         link: bool,
@@ -974,7 +982,7 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
             },
         };
     }
-    if word & 0x7e00_0000 == 0x2800_0000 {
+    if matches!(word & 0x7e00_0000, 0x2800_0000 | 0x2c00_0000) {
         let addressing = match (word >> 23) & 3 {
             1 => PairAddressing::PostIndex,
             2 => PairAddressing::Offset,
@@ -982,13 +990,28 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
             _ => return Operation::Unsupported,
         };
         let load = word & (1 << 22) != 0;
+        let imm = sign_extend(word >> 15, 7);
+        if word & (1 << 26) != 0 {
+            let first = (word & 31) as u8;
+            let second = ((word >> 10) & 31) as u8;
+            if word >> 30 != 2 || (load && first == second) {
+                return Operation::Unsupported;
+            }
+            return Operation::VectorPair {
+                first,
+                second,
+                base,
+                offset: (imm * 16) as u64,
+                load,
+                addressing,
+            };
+        }
         let second = reg(word >> 10, false);
         if (load && dst == second)
             || (addressing != PairAddressing::Offset && (base == dst || base == second))
         {
             return Operation::Unsupported;
         }
-        let imm = sign_extend(word >> 15, 7);
         return if word >> 31 == 0 {
             Operation::WordPair {
                 first: dst,
