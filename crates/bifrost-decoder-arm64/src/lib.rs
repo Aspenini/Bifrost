@@ -514,7 +514,7 @@ fn logical_kind(word: u32) -> Logical {
 }
 
 fn pointer_auth(word: u32) -> Option<Arm64PointerAuth> {
-    use Arm64PointerAction::{Authenticate, AuthenticateReturn, Sign};
+    use Arm64PointerAction::{Authenticate, AuthenticateReturn, Sign, Strip};
     use Arm64PointerKey::{DataA, DataB, InstructionA, InstructionB};
     use Arm64PointerModifier::{Register, StackPointer, Zero};
 
@@ -523,8 +523,22 @@ fn pointer_auth(word: u32) -> Option<Arm64PointerAuth> {
         0xd503_237f => (Sign, InstructionB),
         0xd503_23bf => (Authenticate, InstructionA),
         0xd503_23ff => (Authenticate, InstructionB),
+        0xd503_20ff => (Strip, InstructionA), // XPACLRI
         0xd65f_0bff => (AuthenticateReturn, InstructionA),
         0xd65f_0fff => (AuthenticateReturn, InstructionB),
+        _ if matches!(word & !31, 0xdac1_43e0 | 0xdac1_47e0) => {
+            return Some(Arm64PointerAuth {
+                action: Strip,
+                // The key identifies the address class for strip operations.
+                key: if word & (1 << 10) == 0 {
+                    InstructionA
+                } else {
+                    DataA
+                },
+                pointer_register: (word & 31) as u8,
+                modifier: Zero,
+            });
+        }
         _ if word & 0xffff_c000 == 0xdac1_0000 => {
             let pointer_register = (word & 31) as u8;
             let modifier_reg = ((word >> 5) & 31) as u8;
@@ -557,7 +571,7 @@ fn pointer_auth(word: u32) -> Option<Arm64PointerAuth> {
         action,
         key,
         pointer_register: 30,
-        modifier: StackPointer,
+        modifier: if action == Strip { Zero } else { StackPointer },
     })
 }
 

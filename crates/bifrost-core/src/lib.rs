@@ -178,6 +178,7 @@ pub enum Arm64PointerAction {
     Sign,
     Authenticate,
     AuthenticateReturn,
+    Strip,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

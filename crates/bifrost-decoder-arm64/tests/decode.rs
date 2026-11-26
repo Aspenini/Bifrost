@@ -78,6 +78,28 @@ fn rejects_other_forms_and_unaligned_fetches() {
 }
 
 #[test]
+fn identifies_pointer_strip_registers_and_address_classes() {
+    use bifrost_core::{
+        Arm64PointerAction, Arm64PointerAuth, Arm64PointerKey, Arm64PointerModifier,
+    };
+    for (word, key, pointer_register) in [
+        (0xd503_20ff, Arm64PointerKey::InstructionA, 30),
+        (0xdac1_43e0, Arm64PointerKey::InstructionA, 0),
+        (0xdac1_47e1, Arm64PointerKey::DataA, 1),
+    ] {
+        assert_eq!(
+            op(word),
+            Operation::PointerAuth(Arm64PointerAuth {
+                action: Arm64PointerAction::Strip,
+                key,
+                pointer_register,
+                modifier: Arm64PointerModifier::Zero,
+            })
+        );
+    }
+}
+
+#[test]
 fn decodes_the_full_supervisor_call_immediate() {
     assert_eq!(
         op(0xd41f_ffe1),
