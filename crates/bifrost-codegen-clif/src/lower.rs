@@ -42,6 +42,7 @@ pub(crate) const MEMORY_ATOMIC_ADD: u32 = 1 << 21;
 pub(crate) const MEMORY_VECTOR: u32 = 1 << 22;
 pub(crate) const MEMORY_ATOMIC_CLEAR: u32 = 1 << 23;
 pub(crate) const MEMORY_ATOMIC_SET: u32 = 1 << 24;
+pub(crate) const MEMORY_ATOMIC_SWAP: u32 = 1 << 25;
 
 pub(crate) fn into_function(
     function: &mut Function,
@@ -435,6 +436,20 @@ impl Lowering<'_> {
                     self.values[&expected].value,
                     layout,
                     MEMORY_WRITE | MEMORY_COMPARE_EXCHANGE,
+                )?;
+                (out, self.load(HELPER_VALUE), layout.ty.bit_width())
+            }
+            Op::AtomicSwap {
+                out,
+                guard,
+                replacement,
+                layout,
+            } => {
+                self.memory_access(
+                    guard,
+                    self.values[&replacement].value,
+                    layout,
+                    MEMORY_WRITE | MEMORY_ATOMIC_SWAP,
                 )?;
                 (out, self.load(HELPER_VALUE), layout.ty.bit_width())
             }

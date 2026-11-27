@@ -59,6 +59,19 @@ pub trait GuestMemory: GuestMemoryRead {
         Ok(u64::from_le_bytes(previous))
     }
 
+    /// Replaces a little-endian scalar and returns the old value.
+    /// Shared backing stores must override this method to serialize the entire operation.
+    fn swap_le(
+        &mut self,
+        address: GuestAddress,
+        width: usize,
+        replacement: u64,
+    ) -> Result<u64, MemoryError> {
+        let previous = read_atomic_value(self, address, width)?;
+        self.write(address, &replacement.to_le_bytes()[..width])?;
+        Ok(u64::from_le_bytes(previous))
+    }
+
     /// Adds to a little-endian scalar with width-specific wrapping and returns the old value.
     /// Shared backing stores must override this method to serialize the entire operation.
     fn fetch_add_le(

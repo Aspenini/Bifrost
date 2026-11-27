@@ -460,7 +460,13 @@ impl Values {
                 self.consume_atomic_guard(guard, layout, pc)?;
                 (out, layout.ty)
             }
-            Op::AtomicAdd {
+            Op::AtomicSwap {
+                out,
+                guard,
+                replacement: operand,
+                layout,
+            }
+            | Op::AtomicAdd {
                 out,
                 guard,
                 addend: operand,

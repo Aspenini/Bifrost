@@ -349,6 +349,10 @@ impl MemoryContext<'_> {
             self.memory
                 .compare_exchange_le(address, width, value as u64, (value >> 64) as u64)
                 .map(u128::from)
+        } else if options & lower::MEMORY_ATOMIC_SWAP != 0 {
+            self.memory
+                .swap_le(address, width, value as u64)
+                .map(u128::from)
         } else if options & lower::MEMORY_ATOMIC_ADD != 0 {
             self.memory
                 .fetch_add_le(address, width, value as u64)

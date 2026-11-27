@@ -231,6 +231,20 @@ pub(crate) fn instruction(
                 .map_err(|err| memory_error(pc, thread, AccessKind::Write, err))?;
             (out, Value::new(layout.ty, u128::from(previous)))
         }
+        Op::AtomicSwap {
+            out,
+            guard,
+            replacement,
+            layout,
+        } => {
+            let address = guarded_address(locals, guard);
+            let width = check_access(pc, thread, address, AccessKind::Write, layout)?;
+            let replacement = data(locals, replacement).bits as u64;
+            let previous = memory
+                .swap_le(address, width, replacement)
+                .map_err(|err| memory_error(pc, thread, AccessKind::Write, err))?;
+            (out, Value::new(layout.ty, u128::from(previous)))
+        }
         Op::AtomicAdd {
             out,
             guard,

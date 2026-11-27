@@ -1122,12 +1122,12 @@ fn compare_exchange_returns_the_old_value_and_faults_before_writeback() {
 
 #[test]
 fn atomic_add_returns_the_old_value_and_wraps_at_the_access_width() {
-    check_atomic_update(0xb8e1_0002, u32::MAX, 1);
+    check_atomic_update(0xb8e1_0002, u64::from(u32::MAX), 1);
 }
 
 #[test]
 fn atomic_clear_returns_the_old_value_and_only_clears_selected_bits() {
-    check_atomic_update(0xb8e1_1002, u32::MAX, u32::MAX - 2);
+    check_atomic_update(0xb8e1_1002, u64::from(u32::MAX), u64::from(u32::MAX - 2));
 }
 
 #[test]
@@ -1135,27 +1135,35 @@ fn atomic_set_returns_the_old_value_and_only_sets_selected_bits() {
     check_atomic_update(0xb8e1_3002, 0x81, 0x83);
 }
 
-fn check_atomic_update(word: u32, initial_word: u32, expected_word: u32) {
+#[test]
+fn atomic_swap_returns_the_old_value_and_preserves_adjacent_bytes() {
+    check_atomic_update(0x38a1_8002, 0xab, 2); // swpab w1, w2, [x0]
+    check_atomic_update(0xf8e1_8002, 0x1234_5678_9abc_def0, 2); // swpal x1, x2, [x0]
+}
+
+fn check_atomic_update(word: u32, initial_word: u64, expected_word: u64) {
     let (mut memory, mut thread) = memory_and_thread(&[word], Protection::ReadWrite);
-    let mut initial = [0x66; 5];
-    initial[..4].copy_from_slice(&initial_word.to_le_bytes());
+    let width = 1 << (word >> 30);
+    let mut initial = [0x66; 9];
+    initial[..width].copy_from_slice(&initial_word.to_le_bytes()[..width]);
     memory.write(DATA, &initial).unwrap();
     let CpuState::AArch64(cpu) = &mut thread.cpu else {
         unreachable!()
     };
     cpu.x[0] = DATA.0;
     cpu.x[1] = 2;
+    cpu.x[2] = u64::MAX;
     let original = thread.clone();
     let exit = RawInterpreter::new(&target(), &mut memory, &mut ())
         .unwrap()
         .step(&mut thread)
         .unwrap();
     let check = |thread: &GuestThread, memory: &AddressSpace| {
-        assert_eq!(state(thread).x[1..3], [2, u64::from(initial_word)]);
-        let mut bytes = [0; 5];
+        assert_eq!(state(thread).x[1..3], [2, initial_word]);
+        let mut bytes = [0; 9];
         memory.read(DATA, &mut bytes).unwrap();
-        assert_eq!(bytes[..4], expected_word.to_le_bytes());
-        assert_eq!(bytes[4], 0x66);
+        assert_eq!(bytes[..width], expected_word.to_le_bytes()[..width]);
+        assert_eq!(bytes[width..], initial[width..]);
     };
     assert_eq!(exit, ExitReason::Dispatch(Addr(CODE.0 + 4)));
     check(&thread, &memory);

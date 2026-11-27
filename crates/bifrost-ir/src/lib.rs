@@ -350,6 +350,12 @@ pub enum Op {
         replacement: ValueId,
         layout: MemoryLayout,
     },
+    AtomicSwap {
+        out: ValueId,
+        guard: ValueId,
+        replacement: ValueId,
+        layout: MemoryLayout,
+    },
     AtomicAdd {
         out: ValueId,
         guard: ValueId,

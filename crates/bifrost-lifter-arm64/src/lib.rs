@@ -604,7 +604,15 @@ impl Arm64Lifter {
                 }
                 ir.next(next)
             }
-            Operation::AtomicAdd {
+            Operation::AtomicSwap {
+                dst,
+                src: operand,
+                base,
+                size_log2,
+                acquire,
+                release,
+            }
+            | Operation::AtomicAdd {
                 dst,
                 addend: operand,
                 base,
@@ -640,23 +648,26 @@ impl Arm64Lifter {
                 if release {
                     ir.emit(Op::Fence);
                 }
-                let result = ir.value(|out| {
-                    if let Operation::AtomicBitUpdate { set, .. } = instruction.operation() {
-                        Op::AtomicBitUpdate {
-                            out,
-                            guard,
-                            mask: operand,
-                            set,
-                            layout,
-                        }
-                    } else {
-                        Op::AtomicAdd {
-                            out,
-                            guard,
-                            addend: operand,
-                            layout,
-                        }
-                    }
+                let result = ir.value(|out| match instruction.operation() {
+                    Operation::AtomicSwap { .. } => Op::AtomicSwap {
+                        out,
+                        guard,
+                        replacement: operand,
+                        layout,
+                    },
+                    Operation::AtomicBitUpdate { set, .. } => Op::AtomicBitUpdate {
+                        out,
+                        guard,
+                        mask: operand,
+                        set,
+                        layout,
+                    },
+                    _ => Op::AtomicAdd {
+                        out,
+                        guard,
+                        addend: operand,
+                        layout,
+                    },
                 });
                 if acquire {
                     ir.emit(Op::Fence);
