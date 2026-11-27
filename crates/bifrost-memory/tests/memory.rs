@@ -4,6 +4,40 @@ use bifrost_memory::{
 };
 
 #[test]
+fn an_in_place_reservation_preserves_data_and_requires_a_complete_release() {
+    let mut memory = AddressSpace::new(4096, 4).unwrap();
+    let start = Addr(0x1000);
+    memory.map(start, 8192, Protection::ReadWrite).unwrap();
+    memory.write(start, b"keep").unwrap();
+    assert!(
+        memory
+            .reserve_pages(start, 12288, Protection::Read)
+            .is_err()
+    );
+    assert_eq!(
+        memory.region_at(start).protection,
+        Some(Protection::ReadWrite)
+    );
+
+    memory.reserve_pages(start, 8192, Protection::Read).unwrap();
+    let mut bytes = [0; 4];
+    memory.read(start, &mut bytes).unwrap();
+    assert_eq!(&bytes, b"keep");
+    assert!(memory.write(start, b"busy").is_err());
+    assert!(memory.unmap(start, 8192).is_err());
+    assert!(memory.protect(start, 8192, Protection::ReadWrite).is_err());
+    assert!(memory.set_permission_lock(start, 8192, false).is_err());
+    assert!(memory.release_reserved_pages(start, 4096).is_err());
+    assert_eq!(memory.mapped_pages(), 2);
+
+    memory.release_reserved_pages(start, 8192).unwrap();
+    memory.read(start, &mut bytes).unwrap();
+    assert_eq!(&bytes, b"keep");
+    memory.write(start, b"done").unwrap();
+    memory.unmap(start, 8192).unwrap();
+}
+
+#[test]
 fn region_queries_follow_current_protection_and_unmapped_gaps() {
     let mut memory = AddressSpace::new(4096, 4).unwrap();
     memory

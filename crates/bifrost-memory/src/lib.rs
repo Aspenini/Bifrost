@@ -38,6 +38,7 @@ struct Page {
 pub enum PageLoan {
     Source,
     Destination { source: GuestAddress },
+    InPlace { start: GuestAddress, len: u64 },
 }
 
 /// Software-enforced guest pages. Memory is zero-filled on mapping and owned by this instance.
@@ -332,6 +333,65 @@ impl AddressSpace {
                 ..destination
             };
             self.loaned_pages -= 1;
+        }
+        self.generation = generation;
+        Ok(())
+    }
+
+    /// Reserve a read-write range in place with reduced or unchanged guest access.
+    /// Protection changes, unmapping and further loans are blocked until release.
+    pub fn reserve_pages(
+        &mut self,
+        start: GuestAddress,
+        len: u64,
+        protection: Protection,
+    ) -> Result<(), MemoryError> {
+        if !matches!(
+            protection,
+            Protection::None | Protection::Read | Protection::ReadWrite
+        ) {
+            return Err(MemoryError::InvalidPageLoan(start));
+        }
+        let bases = self.region(start, len)?;
+        self.check_mapped(bases.clone())?;
+        for base in bases.clone() {
+            let page = &self.pages[&base];
+            if page.protection != Protection::ReadWrite || page.permission_locked {
+                return Err(MemoryError::InvalidPageLoan(GuestAddress(base)));
+            }
+        }
+        let loan = Some(PageLoan::InPlace { start, len });
+        self.update_page_reservation(bases, loan, protection)
+    }
+
+    /// Release the complete in-place reservation and restore its read-write access.
+    pub fn release_reserved_pages(
+        &mut self,
+        start: GuestAddress,
+        len: u64,
+    ) -> Result<(), MemoryError> {
+        let bases = self.region(start, len)?;
+        let loan = Some(PageLoan::InPlace { start, len });
+        for base in bases.clone() {
+            if self.page_loan_at(GuestAddress(base)) != loan {
+                return Err(MemoryError::InvalidPageLoan(GuestAddress(base)));
+            }
+        }
+        self.update_page_reservation(bases, None, Protection::ReadWrite)
+    }
+
+    fn update_page_reservation(
+        &mut self,
+        bases: impl Iterator<Item = u64>,
+        loan: Option<PageLoan>,
+        protection: Protection,
+    ) -> Result<(), MemoryError> {
+        let generation = self.next_generation()?;
+        for base in bases {
+            let page = self.pages.get_mut(&base).expect("validated reserved page");
+            page.loan = loan;
+            page.protection = protection;
+            page.generation = generation;
         }
         self.generation = generation;
         Ok(())
