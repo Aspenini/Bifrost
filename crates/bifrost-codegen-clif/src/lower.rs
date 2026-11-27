@@ -25,6 +25,8 @@ pub(crate) const TPIDR: i32 = 37 * 8;
 pub(crate) const TPIDRRO: i32 = 38 * 8;
 pub(crate) const VECTOR_REGISTERS: i32 = 39 * 8;
 pub(crate) const HELPER_VECTORS: i32 = 40 * 8;
+pub(crate) const FPCR: i32 = 44 * 8;
+pub(crate) const FPSR: i32 = 45 * 8;
 pub(crate) const DISPATCH: i64 = 0;
 pub(crate) const NONCANONICAL: i64 = 1;
 pub(crate) const ILLEGAL: i64 = 2;
@@ -623,6 +625,8 @@ impl Lowering<'_> {
             }
             Register::X86(X86Reg::Rflags) => Ok((FLAGS, 64)),
             Register::Arm64(Arm64Reg::Nzcv) => Ok((FLAGS, 32)),
+            Register::Arm64(Arm64Reg::Fpcr) => Ok((FPCR, 32)),
+            Register::Arm64(Arm64Reg::Fpsr) => Ok((FPSR, 32)),
             Register::Arm64(Arm64Reg::Sp) => Ok((STACK, 64)),
             Register::Arm64(Arm64Reg::TpidrEl0) => Ok((TPIDR, 64)),
             Register::Arm64(Arm64Reg::TpidrroEl0) => Ok((TPIDRRO, 64)),

@@ -26,7 +26,17 @@ pub(super) fn multiply_add(
         Format::SINGLE
     };
     let read = |reg| format.unpack(cpu.v[usize::from(reg)] as u64);
-    let (bits, flags) = format.fma(read(op.lhs), read(op.rhs), read(op.addend), cpu.fpcr);
+    let with_sign = |reg, negate| {
+        let value = read(reg);
+        if negate {
+            format.unpack(value.bits ^ format.sign_bit(true))
+        } else {
+            value
+        }
+    };
+    let lhs = with_sign(op.lhs, op.negate_product);
+    let addend = with_sign(op.addend, op.negate_addend);
+    let (bits, flags) = format.fma(lhs, read(op.rhs), addend, cpu.fpcr);
     write_result(cpu, pc, op.dst, bits, flags);
     Ok(())
 }
@@ -675,6 +685,8 @@ mod tests {
             rhs: 0,
             addend: 0,
             double: true,
+            negate_addend: false,
+            negate_product: false,
         };
         let pc = GuestAddress(0x1000);
         let mut cpu = Arm64State {

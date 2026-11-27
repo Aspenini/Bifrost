@@ -88,7 +88,9 @@ impl fmt::Display for LiftError {
             Self::ReadCounter { pc, register, .. } => {
                 write!(f, "ARM64 {register:?} timer read at {:#x}", pc.0)
             }
-            Self::FloatMultiplyAdd { pc, .. } => write!(f, "ARM64 scalar FMADD at {:#x}", pc.0),
+            Self::FloatMultiplyAdd { pc, .. } => {
+                write!(f, "ARM64 scalar fused multiply-add/subtract at {:#x}", pc.0)
+            }
             Self::FloatBinary { pc, operation } => {
                 write!(
                     f,
@@ -736,6 +738,27 @@ impl Arm64Lifter {
                     register: Register::Arm64(Arm64Reg::V(vector)),
                     value,
                 });
+                ir.next(next)
+            }
+            Operation::FloatSystemRegister { reg, status, read } => {
+                let register = Register::Arm64(if status {
+                    Arm64Reg::Fpsr
+                } else {
+                    Arm64Reg::Fpcr
+                });
+                if read {
+                    let value = ir.value(|out| Op::ReadRegister { out, register });
+                    let value = ir.cast(value, Type::I64);
+                    ir.write(reg, value);
+                } else {
+                    let value = ir.read(reg);
+                    // The base register profile exposes cumulative status, rounding,
+                    // NaN, flush, precision, and exception-enable fields.
+                    let mask = if status { 0xf800_009f } else { 0x07c8_9f00 };
+                    let value = ir.with_immediate(IntOp::And, value, mask);
+                    let value = ir.cast(value, Type::I32);
+                    ir.emit(Op::WriteRegister { register, value });
+                }
                 ir.next(next)
             }
             Operation::MoveFloatRegister { dst, src, double } => {

@@ -23,6 +23,8 @@ pub struct FloatMultiplyAdd {
     pub rhs: u8,
     pub addend: u8,
     pub double: bool,
+    pub negate_product: bool,
+    pub negate_addend: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -401,6 +403,11 @@ pub enum Operation {
         dst: u8,
         src: u8,
         double: bool,
+    },
+    FloatSystemRegister {
+        reg: Reg,
+        status: bool,
+        read: bool,
     },
     MoveVectorImmediate {
         vector: u8,
@@ -915,13 +922,17 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
             signed: word & (1 << 16) == 0,
         });
     }
-    if word & 0xffa0_8000 == 0x1f00_0000 {
+    if word & 0xff80_0000 == 0x1f00_0000 {
+        let subtract = word & (1 << 15) != 0;
+        let negate = word & (1 << 21) != 0;
         return Operation::FloatMultiplyAdd(FloatMultiplyAdd {
             dst: (word & 31) as u8,
             lhs: ((word >> 5) & 31) as u8,
             rhs: ((word >> 16) & 31) as u8,
             addend: ((word >> 10) & 31) as u8,
             double: word & (1 << 22) != 0,
+            negate_product: subtract ^ negate,
+            negate_addend: negate,
         });
     }
     if matches!(word & 0xffff_fc00, 0x1e22_c000 | 0x1e62_4000) {
@@ -946,6 +957,13 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
         };
     }
     match word & !31 {
+        0xd53b_4400 | 0xd53b_4420 | 0xd51b_4400 | 0xd51b_4420 => {
+            return Operation::FloatSystemRegister {
+                reg: dst,
+                status: word & 32 != 0,
+                read: word & (1 << 21) != 0,
+            };
+        }
         kind @ (0xd53b_e000 | 0xd53b_e020 | 0xd53b_e040) => {
             let register = match kind {
                 0xd53b_e000 => Arm64CounterRegister::Frequency,

@@ -19,9 +19,10 @@ The raw profile uses little-endian A64 instructions and serialized execution ove
 | Register-offset memory | Unsigned byte, halfword, word and doubleword loads and stores with Xn or SP base and UXTW, SXTW, SXTX or LSL offset |
 | Paired memory | 32-bit and 64-bit general-purpose pairs and 32-bit, 64-bit and 128-bit SIMD pairs. Supports signed-offset, pre-index and post-index forms with an Xn or SP base and distinct LDP destinations. |
 | SIMD scalar and vector transfers | B, H, S, D and Q loads and stores with scaled or unscaled immediate offsets, including pre-index and post-index writeback. FMOV supports S/D immediates, same-width S/D register moves, and bit transfers between W/S or X/D registers. |
-| Scalar floating point | Binary32 and binary64 FMADD, FADD, FSUB, FMUL, FDIV, FCMP, FCMPE, FCCMP and FCCMPE, and unscaled SCVTF/UCVTF from W/X registers. The raw runtime shares an exact rounding path across both backends, with cumulative FPSR flags, FPCR rounding modes, and default-NaN support. Other FPCR controls are reported as unsupported. |
+| Scalar floating point | Binary32 and binary64 fused multiply-add/subtract (FMADD, FMSUB, FNMADD, FNMSUB), FADD, FSUB, FMUL, FDIV, FCMP, FCMPE, FCCMP and FCCMPE, and unscaled SCVTF/UCVTF from W/X registers. The raw runtime shares an exact rounding path across both backends, with cumulative FPSR flags, FPCR rounding modes, and default-NaN support. Other FPCR controls are reported as unsupported. |
 | SIMD immediates | Integer MOVI, including byte masks in 64-bit lanes. |
 | SIMD lanes | Single-register LD1/ST1 for one B/H/S/D lane, including immediate and register post-index forms. |
+| Floating-point system registers | MRS and MSR for FPCR and FPSR in the base AArch64 profile. Guest writes ignore reserved bits. |
 | Floating-point precision and unary operations | Scalar FSQRT and FCVT between binary32 and binary64. FABS and FNEG for scalars and 2S/4S/2D vectors in the supported FPCR profile. |
 | Branch | B, BL, B.cond, BR, BLR, 32-bit and 64-bit CBZ/CBNZ, TBZ/TBNZ, RET Xn |
 | Miscellaneous | NOP, DMB ISH, UDF |
