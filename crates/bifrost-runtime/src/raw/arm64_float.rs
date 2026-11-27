@@ -11,6 +11,8 @@ const DIVIDE_BY_ZERO: u32 = 1 << 1;
 const OVERFLOW: u32 = 1 << 2;
 const UNDERFLOW: u32 = 1 << 3;
 const INEXACT: u32 = 1 << 4;
+const INPUT_DENORMAL: u32 = 1 << 7;
+const FLUSH_TO_ZERO: u32 = 1 << 24;
 const DEFAULT_NAN: u32 = 1 << 25;
 const ROUNDING_MASK: u32 = 3 << 22;
 
@@ -25,19 +27,15 @@ pub(super) fn multiply_add(
     } else {
         Format::SINGLE
     };
-    let read = |reg| format.unpack(cpu.v[usize::from(reg)] as u64);
-    let with_sign = |reg, negate| {
-        let value = read(reg);
-        if negate {
-            format.unpack(value.bits ^ format.sign_bit(true))
-        } else {
-            value
-        }
+    let mut input_flags = 0;
+    let mut read = |reg, negate| {
+        let bits = cpu.v[usize::from(reg)] as u64 ^ format.sign_bit(negate);
+        format.unpack_input(bits, cpu.fpcr, &mut input_flags)
     };
-    let lhs = with_sign(op.lhs, op.negate_product);
-    let addend = with_sign(op.addend, op.negate_addend);
-    let (bits, flags) = format.fma(lhs, read(op.rhs), addend, cpu.fpcr);
-    write_result(cpu, pc, op.dst, bits, flags);
+    let lhs = read(op.lhs, op.negate_product);
+    let addend = read(op.addend, op.negate_addend);
+    let (bits, flags) = format.fma(lhs, read(op.rhs, false), addend, cpu.fpcr);
+    write_result(cpu, pc, op.dst, bits, flags | input_flags);
     Ok(())
 }
 
@@ -74,7 +72,7 @@ pub(super) fn integer_to_float(
             top,
             0,
             sign,
-            (cpu.fpcr >> 22) & 3,
+            cpu.fpcr,
         )
     };
     write_result(cpu, pc, op.dst, bits, flags);
@@ -82,7 +80,7 @@ pub(super) fn integer_to_float(
 }
 
 fn check_control(cpu: &Arm64State, pc: GuestAddress) -> Result<(), ExecutionError> {
-    if cpu.fpcr & !(DEFAULT_NAN | ROUNDING_MASK) != 0 {
+    if cpu.fpcr & !(DEFAULT_NAN | ROUNDING_MASK | FLUSH_TO_ZERO) != 0 {
         return Err(ExecutionError::UnsupportedArm64Fpcr { pc, fpcr: cpu.fpcr });
     }
     Ok(())
@@ -99,7 +97,12 @@ pub(super) fn convert(
     } else {
         (Format::DOUBLE, Format::SINGLE)
     };
-    let value = from.unpack(cpu.v[usize::from(op.src)] as u64);
+    let mut input_flags = 0;
+    let value = from.unpack_input(
+        cpu.v[usize::from(op.src)] as u64,
+        cpu.fpcr,
+        &mut input_flags,
+    );
     let (bits, flags) = if from.is_nan(value) {
         let source_quiet = 1 << (from.fraction - 1);
         let dest_quiet = 1 << (to.fraction - 1);
@@ -132,11 +135,11 @@ pub(super) fn convert(
                 top,
                 base,
                 value.sign,
-                (cpu.fpcr >> 22) & 3,
+                cpu.fpcr,
             )
         }
     };
-    write_result(cpu, pc, op.dst, bits, flags);
+    write_result(cpu, pc, op.dst, bits, flags | input_flags);
     Ok(())
 }
 
@@ -160,8 +163,12 @@ pub(super) fn compare(
     } else {
         Format::SINGLE
     };
-    let lhs = format.unpack(cpu.v[usize::from(op.lhs)] as u64);
-    let rhs = format.unpack(op.rhs.map_or(0, |index| cpu.v[usize::from(index)] as u64));
+    let lhs = format.unpack_input(cpu.v[usize::from(op.lhs)] as u64, cpu.fpcr, &mut cpu.fpsr);
+    let rhs = format.unpack_input(
+        op.rhs.map_or(0, |index| cpu.v[usize::from(index)] as u64),
+        cpu.fpcr,
+        &mut cpu.fpsr,
+    );
     let sign = format.sign_bit(true);
     let order = if format.is_nan(lhs) || format.is_nan(rhs) {
         let signaling =
@@ -234,9 +241,14 @@ pub(super) fn unary(
         } else {
             Format::SINGLE
         };
-        let value = format.unpack(cpu.v[usize::from(op.src)] as u64);
+        let mut input_flags = 0;
+        let value = format.unpack_input(
+            cpu.v[usize::from(op.src)] as u64,
+            cpu.fpcr,
+            &mut input_flags,
+        );
         let (bits, flags) = format.square_root(value, cpu.fpcr);
-        write_result(cpu, pc, op.dst, bits, flags);
+        write_result(cpu, pc, op.dst, bits, flags | input_flags);
         return Ok(());
     }
     let lane_width = if op.double { 64 } else { 32 };
@@ -265,8 +277,17 @@ pub(super) fn binary(
     } else {
         Format::SINGLE
     };
-    let lhs = format.unpack(cpu.v[usize::from(op.lhs)] as u64);
-    let rhs = format.unpack(cpu.v[usize::from(op.rhs)] as u64);
+    let mut input_flags = 0;
+    let lhs = format.unpack_input(
+        cpu.v[usize::from(op.lhs)] as u64,
+        cpu.fpcr,
+        &mut input_flags,
+    );
+    let rhs = format.unpack_input(
+        cpu.v[usize::from(op.rhs)] as u64,
+        cpu.fpcr,
+        &mut input_flags,
+    );
     let (bits, flags) = match op.kind {
         FloatBinaryKind::Divide => format.divide(lhs, rhs, cpu.fpcr),
         FloatBinaryKind::Multiply => {
@@ -284,7 +305,7 @@ pub(super) fn binary(
             format.fma(rhs, one, lhs, cpu.fpcr)
         }
     };
-    write_result(cpu, pc, op.dst, bits, flags);
+    write_result(cpu, pc, op.dst, bits, flags | input_flags);
     Ok(())
 }
 
@@ -321,6 +342,16 @@ impl Format {
             fraction: bits & ((1 << self.fraction) - 1),
             exponent: (bits >> self.fraction) & self.infinity_exponent(),
             bits: bits & (self.sign_bit(true) | (self.sign_bit(true) - 1)),
+        }
+    }
+
+    fn unpack_input(self, bits: u64, fpcr: u32, flags: &mut u32) -> Operand {
+        let value = self.unpack(bits);
+        if fpcr & FLUSH_TO_ZERO != 0 && value.exponent == 0 && value.fraction != 0 {
+            *flags |= INPUT_DENORMAL;
+            self.unpack(self.sign_bit(value.sign))
+        } else {
+            value
         }
     }
 
@@ -381,7 +412,7 @@ impl Format {
             top,
             (exponent - shift as i32) / 2,
             false,
-            (fpcr >> 22) & 3,
+            fpcr,
         )
     }
 
@@ -417,13 +448,7 @@ impl Format {
         let quotient = (scaled / denominator) | u128::from(!scaled.is_multiple_of(denominator));
         let base = numerator_exp - denominator_exp - shift as i32;
         let top = (127 - quotient.leading_zeros()) as usize;
-        self.round(
-            Wide::shifted(quotient, 0),
-            top,
-            base,
-            sign,
-            (fpcr >> 22) & 3,
-        )
+        self.round(Wide::shifted(quotient, 0), top, base, sign, fpcr)
     }
 
     fn finite(self, operand: Operand) -> (u64, i32) {
@@ -505,20 +530,18 @@ impl Format {
             };
             return (self.sign_bit(negative), 0);
         };
-        self.round(magnitude, top, base, sign, rounding)
+        self.round(magnitude, top, base, sign, fpcr)
     }
 
-    fn round(
-        self,
-        magnitude: Wide,
-        top: usize,
-        base: i32,
-        sign: bool,
-        rounding: u32,
-    ) -> (u64, u32) {
+    fn round(self, magnitude: Wide, top: usize, base: i32, sign: bool, fpcr: u32) -> (u64, u32) {
         let minimum = 1 - self.bias;
         let mut exponent = base + top as i32;
         let tiny = exponent < minimum;
+        // In the base FP profile, flush tiny outputs before rounding and set UFC.
+        if tiny && fpcr & FLUSH_TO_ZERO != 0 {
+            return (self.sign_bit(sign), UNDERFLOW);
+        }
+        let rounding = (fpcr >> 22) & 3;
         let shift = exponent.max(minimum) - self.fraction as i32 - base;
         let (mut significand, midpoint, sticky) = if shift > 0 {
             let shift = shift as usize;
@@ -691,7 +714,7 @@ mod tests {
         let pc = GuestAddress(0x1000);
         let mut cpu = Arm64State {
             pc,
-            fpcr: 1 << 24,
+            fpcr: 1 << 8,
             ..Default::default()
         };
         cpu.v[0] = u128::MAX;
@@ -699,11 +722,53 @@ mod tests {
         assert!(matches!(
             multiply_add(&mut cpu, pc, op),
             Err(ExecutionError::UnsupportedArm64Fpcr {
-                fpcr: 0x0100_0000,
+                fpcr: 0x0000_0100,
                 ..
             })
         ));
         assert_eq!(cpu, before);
+    }
+
+    #[test]
+    fn flush_to_zero_preserves_sign_and_distinguishes_input_and_output_flags() {
+        let pc = GuestAddress(0x1000);
+        let op = FloatBinary {
+            dst: 0,
+            lhs: 1,
+            rhs: 2,
+            double: true,
+            kind: FloatBinaryKind::Multiply,
+        };
+        let mut cpu = Arm64State {
+            pc,
+            fpcr: FLUSH_TO_ZERO | (2 << 22),
+            ..Default::default()
+        };
+        cpu.v[1] = u128::from((-f64::MIN_POSITIVE).to_bits());
+        cpu.v[2] = u128::from(0.5f64.to_bits());
+        binary(&mut cpu, pc, op).unwrap();
+        assert_eq!(cpu.v[0], 1 << 63);
+        assert_eq!(cpu.fpsr, UNDERFLOW);
+
+        cpu.v[1] = (1 << 63) | 1;
+        binary(&mut cpu, pc, op).unwrap();
+        assert_eq!(cpu.v[0], 1 << 63);
+        assert_eq!(cpu.fpsr, UNDERFLOW | INPUT_DENORMAL);
+
+        cpu.fpsr = 0;
+        cpu.v[1] = (1 << 31) | 1;
+        convert(
+            &mut cpu,
+            pc,
+            FloatConvert {
+                dst: 0,
+                src: 1,
+                to_double: true,
+            },
+        )
+        .unwrap();
+        assert_eq!(cpu.v[0], 1 << 63);
+        assert_eq!(cpu.fpsr, INPUT_DENORMAL);
     }
 
     #[test]
