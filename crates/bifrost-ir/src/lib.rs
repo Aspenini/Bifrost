@@ -356,10 +356,11 @@ pub enum Op {
         addend: ValueId,
         layout: MemoryLayout,
     },
-    AtomicClear {
+    AtomicBitUpdate {
         out: ValueId,
         guard: ValueId,
         mask: ValueId,
+        set: bool,
         layout: MemoryLayout,
     },
     /// Read one contiguous 16-byte range into two little-endian scalar values.

@@ -1070,17 +1070,23 @@ fn compare_exchange_returns_the_old_value_and_faults_before_writeback() {
 
 #[test]
 fn atomic_add_returns_the_old_value_and_wraps_at_the_access_width() {
-    check_atomic_update(0xb8e1_0002, [1, 0, 0, 0, 0x66]);
+    check_atomic_update(0xb8e1_0002, u32::MAX, 1);
 }
 
 #[test]
 fn atomic_clear_returns_the_old_value_and_only_clears_selected_bits() {
-    check_atomic_update(0xb8e1_1002, [0xfd, 0xff, 0xff, 0xff, 0x66]);
+    check_atomic_update(0xb8e1_1002, u32::MAX, u32::MAX - 2);
 }
 
-fn check_atomic_update(word: u32, expected: [u8; 5]) {
+#[test]
+fn atomic_set_returns_the_old_value_and_only_sets_selected_bits() {
+    check_atomic_update(0xb8e1_3002, 0x81, 0x83);
+}
+
+fn check_atomic_update(word: u32, initial_word: u32, expected_word: u32) {
     let (mut memory, mut thread) = memory_and_thread(&[word], Protection::ReadWrite);
-    let initial = [0xff, 0xff, 0xff, 0xff, 0x66];
+    let mut initial = [0x66; 5];
+    initial[..4].copy_from_slice(&initial_word.to_le_bytes());
     memory.write(DATA, &initial).unwrap();
     let CpuState::AArch64(cpu) = &mut thread.cpu else {
         unreachable!()
@@ -1093,10 +1099,11 @@ fn check_atomic_update(word: u32, expected: [u8; 5]) {
         .step(&mut thread)
         .unwrap();
     let check = |thread: &GuestThread, memory: &AddressSpace| {
-        assert_eq!(state(thread).x[1..3], [2, u64::from(u32::MAX)]);
+        assert_eq!(state(thread).x[1..3], [2, u64::from(initial_word)]);
         let mut bytes = [0; 5];
         memory.read(DATA, &mut bytes).unwrap();
-        assert_eq!(bytes, expected);
+        assert_eq!(bytes[..4], expected_word.to_le_bytes());
+        assert_eq!(bytes[4], 0x66);
     };
     assert_eq!(exit, ExitReason::Dispatch(Addr(CODE.0 + 4)));
     check(&thread, &memory);

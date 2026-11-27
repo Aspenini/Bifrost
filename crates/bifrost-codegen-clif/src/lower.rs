@@ -41,6 +41,7 @@ pub(crate) const MEMORY_COMPARE_EXCHANGE: u32 = 1 << 20;
 pub(crate) const MEMORY_ATOMIC_ADD: u32 = 1 << 21;
 pub(crate) const MEMORY_VECTOR: u32 = 1 << 22;
 pub(crate) const MEMORY_ATOMIC_CLEAR: u32 = 1 << 23;
+pub(crate) const MEMORY_ATOMIC_SET: u32 = 1 << 24;
 
 pub(crate) fn into_function(
     function: &mut Function,
@@ -451,17 +452,23 @@ impl Lowering<'_> {
                 )?;
                 (out, self.load(HELPER_VALUE), layout.ty.bit_width())
             }
-            Op::AtomicClear {
+            Op::AtomicBitUpdate {
                 out,
                 guard,
                 mask,
+                set,
                 layout,
             } => {
                 self.memory_access(
                     guard,
                     self.values[&mask].value,
                     layout,
-                    MEMORY_WRITE | MEMORY_ATOMIC_CLEAR,
+                    MEMORY_WRITE
+                        | if set {
+                            MEMORY_ATOMIC_SET
+                        } else {
+                            MEMORY_ATOMIC_CLEAR
+                        },
                 )?;
                 (out, self.load(HELPER_VALUE), layout.ty.bit_width())
             }

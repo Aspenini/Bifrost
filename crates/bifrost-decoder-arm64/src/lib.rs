@@ -319,9 +319,10 @@ pub enum Operation {
         acquire: bool,
         release: bool,
     },
-    AtomicClear {
+    AtomicBitUpdate {
         dst: Reg,
         mask: Reg,
+        set: bool,
         base: Reg,
         size_log2: u8,
         acquire: bool,
@@ -1273,15 +1274,16 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
             release: word & (1 << 15) != 0,
         };
     }
-    if matches!(word & 0x3f20_fc00, 0x3820_0000 | 0x3820_1000) {
+    if matches!(word & 0x3f20_fc00, 0x3820_0000 | 0x3820_1000 | 0x3820_3000) {
         let operand = reg(word >> 16, false);
         let size_log2 = (word >> 30) as u8;
         let acquire = word & (1 << 23) != 0 && dst != Reg::Zero;
         let release = word & (1 << 22) != 0;
         return if word & (1 << 12) != 0 {
-            Operation::AtomicClear {
+            Operation::AtomicBitUpdate {
                 dst,
                 mask: operand,
+                set: word & (1 << 13) != 0,
                 base,
                 size_log2,
                 acquire,

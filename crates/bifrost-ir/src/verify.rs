@@ -466,11 +466,12 @@ impl Values {
                 addend: operand,
                 layout,
             }
-            | Op::AtomicClear {
+            | Op::AtomicBitUpdate {
                 out,
                 guard,
                 mask: operand,
                 layout,
+                ..
             } => {
                 self.expect(operand, layout.ty)?;
                 self.consume_atomic_guard(guard, layout, pc)?;

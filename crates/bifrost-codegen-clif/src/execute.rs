@@ -357,6 +357,10 @@ impl MemoryContext<'_> {
             self.memory
                 .fetch_clear_le(address, width, value as u64)
                 .map(u128::from)
+        } else if options & lower::MEMORY_ATOMIC_SET != 0 {
+            self.memory
+                .fetch_set_le(address, width, value as u64)
+                .map(u128::from)
         } else if write {
             let bytes = if big_endian {
                 value.to_be_bytes()

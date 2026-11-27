@@ -596,13 +596,14 @@ impl Arm64Lifter {
                 acquire,
                 release,
             }
-            | Operation::AtomicClear {
+            | Operation::AtomicBitUpdate {
                 dst,
                 mask: operand,
                 base,
                 size_log2,
                 acquire,
                 release,
+                ..
             } => {
                 let base = ir.memory_base(base, false);
                 let address = ir.address(base);
@@ -624,11 +625,12 @@ impl Arm64Lifter {
                     ir.emit(Op::Fence);
                 }
                 let result = ir.value(|out| {
-                    if matches!(instruction.operation(), Operation::AtomicClear { .. }) {
-                        Op::AtomicClear {
+                    if let Operation::AtomicBitUpdate { set, .. } = instruction.operation() {
+                        Op::AtomicBitUpdate {
                             out,
                             guard,
                             mask: operand,
+                            set,
                             layout,
                         }
                     } else {
