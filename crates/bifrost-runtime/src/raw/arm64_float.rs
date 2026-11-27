@@ -1,7 +1,7 @@
 use bifrost_core::{Arm64State, GuestAddress};
 use bifrost_decoder_arm64::{
-    FloatBinary, FloatBinaryKind, FloatCompare, FloatConvert, FloatMultiplyAdd, FloatSign,
-    IntegerToFloat,
+    FloatBinary, FloatBinaryKind, FloatCompare, FloatConvert, FloatMultiplyAdd, FloatUnary,
+    FloatUnaryKind, IntegerToFloat,
 };
 
 use super::ExecutionError;
@@ -138,6 +138,13 @@ pub(super) fn compare(
     use std::cmp::Ordering;
 
     check_control(cpu, pc)?;
+    if let Some(when) = op.when
+        && !condition_holds(cpu.nzcv, when.code)
+    {
+        cpu.nzcv = u32::from(when.fallback_nzcv) << 28;
+        cpu.pc = GuestAddress(pc.0.wrapping_add(4));
+        return Ok(());
+    }
     let format = if op.double {
         Format::DOUBLE
     } else {
@@ -181,25 +188,54 @@ pub(super) fn compare(
     Ok(())
 }
 
+fn condition_holds(nzcv: u32, condition: u8) -> bool {
+    let n = nzcv & (1 << 31) != 0;
+    let z = nzcv & (1 << 30) != 0;
+    let c = nzcv & (1 << 29) != 0;
+    let v = nzcv & (1 << 28) != 0;
+    let base = match condition >> 1 {
+        0 => z,
+        1 => c,
+        2 => n,
+        3 => v,
+        4 => c && !z,
+        5 => n == v,
+        6 => n == v && !z,
+        _ => return true,
+    };
+    base ^ (condition & 1 != 0)
+}
+
 fn write_result(cpu: &mut Arm64State, pc: GuestAddress, dst: u8, bits: u64, flags: u32) {
     cpu.v[usize::from(dst)] = u128::from(bits);
     cpu.fpsr |= flags;
     cpu.pc = GuestAddress(pc.0.wrapping_add(4));
 }
 
-pub(super) fn sign(
+pub(super) fn unary(
     cpu: &mut Arm64State,
     pc: GuestAddress,
-    op: FloatSign,
+    op: FloatUnary,
 ) -> Result<(), ExecutionError> {
     check_control(cpu, pc)?;
+    if op.kind == FloatUnaryKind::SquareRoot {
+        let format = if op.double {
+            Format::DOUBLE
+        } else {
+            Format::SINGLE
+        };
+        let value = format.unpack(cpu.v[usize::from(op.src)] as u64);
+        let (bits, flags) = format.square_root(value, cpu.fpcr);
+        write_result(cpu, pc, op.dst, bits, flags);
+        return Ok(());
+    }
     let lane_width = if op.double { 64 } else { 32 };
     let sign_mask = (1..=op.lanes).fold(0u128, |mask, lane| {
         mask | (1 << (u32::from(lane) * lane_width - 1))
     });
     let width = u32::from(op.lanes) * lane_width;
     let bits = cpu.v[usize::from(op.src)] & (u128::MAX >> (128 - width));
-    cpu.v[usize::from(op.dst)] = if op.negate {
+    cpu.v[usize::from(op.dst)] = if op.kind == FloatUnaryKind::Negate {
         bits ^ sign_mask
     } else {
         bits & !sign_mask
@@ -292,6 +328,51 @@ impl Format {
 
     fn is_nan(self, op: Operand) -> bool {
         op.exponent == self.infinity_exponent() && op.fraction != 0
+    }
+
+    fn square_root(self, value: Operand, fpcr: u32) -> (u64, u32) {
+        let quiet = 1 << (self.fraction - 1);
+        let default_nan = self.infinity(false) | quiet;
+        if self.is_nan(value) {
+            let flags = if value.fraction & quiet == 0 {
+                INVALID
+            } else {
+                0
+            };
+            let bits = if fpcr & DEFAULT_NAN != 0 {
+                default_nan
+            } else {
+                value.bits | quiet
+            };
+            return (bits, flags);
+        }
+        let (fraction, exponent) = self.finite(value);
+        if fraction == 0 {
+            return (value.bits, 0);
+        }
+        if value.sign {
+            return (default_nan, INVALID);
+        }
+        if value.exponent == self.infinity_exponent() {
+            return (value.bits, 0);
+        }
+
+        // Scale the exact radicand so the root has extra low bits for rounding.
+        // Keep the power of two even so it can be applied after the square root.
+        let width = 64 - fraction.leading_zeros();
+        let shift = 2 * (self.fraction + 4) - width;
+        let shift = shift + ((exponent - shift as i32) & 1) as u32;
+        let scaled = u128::from(fraction) << shift;
+        let root = scaled.isqrt();
+        let rounded_input = root | u128::from(root * root != scaled);
+        let top = (127 - rounded_input.leading_zeros()) as usize;
+        self.round(
+            Wide::shifted(rounded_input, 0),
+            top,
+            (exponent - shift as i32) / 2,
+            false,
+            (fpcr >> 22) & 3,
+        )
     }
 
     fn divide(self, lhs: Operand, rhs: Operand, fpcr: u32) -> (u64, u32) {
@@ -560,6 +641,7 @@ mod tests {
             rhs: Some(1),
             double: false,
             signal_quiet_nan: false,
+            when: None,
         };
         cpu.v[0] = u128::from((-0.0f32).to_bits());
         compare(&mut cpu, pc, op).unwrap();
@@ -630,6 +712,8 @@ mod tests {
                 assert_eq!(actual, a.mul_add(b, c).to_bits(), "{a:e} * {b:e} + {c:e}");
                 let (actual, _) = format.divide(lhs, rhs, 0);
                 assert_eq!(actual, (a / b).to_bits(), "{a:e} / {b:e}");
+                let (actual, _) = format.square_root(format.unpack(a.abs().to_bits()), 0);
+                assert_eq!(actual, a.abs().sqrt().to_bits(), "sqrt({a:e})");
             }
             let [a, b, c] = std::array::from_fn(|_| f32::from_bits(next() as u32));
             if a.is_finite() && b.is_finite() && c.is_finite() {
@@ -644,6 +728,8 @@ mod tests {
                 );
                 let (actual, _) = format.divide(lhs, rhs, 0);
                 assert_eq!(actual, u64::from((a / b).to_bits()), "{a:e} / {b:e}");
+                let (actual, _) = format.square_root(format.unpack(a.abs().to_bits().into()), 0);
+                assert_eq!(actual, u64::from(a.abs().sqrt().to_bits()), "sqrt({a:e})");
             }
         }
     }

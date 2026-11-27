@@ -150,6 +150,8 @@ fn floating_point_and_vector_lanes_match_on_both_backends() {
                 0x1e60_40eb, // fmov d11,d7
                 0x1e22_c10e, // fcvt d14,s8
                 0x1e62_40af, // fcvt s15,d5
+                0x1e21_c1f0, // fsqrt s16,s15 (negative input sets invalid)
+                0x1e64_0420, // fccmp d1,d4,#0,eq
             ],
             Protection::ReadWrite,
         );
@@ -166,7 +168,8 @@ fn floating_point_and_vector_lanes_match_on_both_backends() {
         cpu.x[12] = 0x1234_5678_9988_7766;
         // The binary32 instruction multiplies infinity by the zero in V4.
         cpu.fpsr = 1 << 27;
-        let budget = ExecutionBudget { instructions: 14 };
+        cpu.nzcv = 0x4000_0000;
+        let budget = ExecutionBudget { instructions: 16 };
         let mut trace = Trace::default();
         let interpret = |memory: &mut AddressSpace, thread: &mut GuestThread, trace: &mut Trace| {
             RawInterpreter::new(&target(), memory, trace)
@@ -195,9 +198,9 @@ fn floating_point_and_vector_lanes_match_on_both_backends() {
         )))]
         let stop = interpret(&mut memory, &mut thread, &mut trace);
         assert_eq!(stop, ExitReason::BudgetExhausted);
-        assert_eq!(trace.0.len(), 14);
+        assert_eq!(trace.0.len(), 16);
         let cpu = state(&thread);
-        assert_eq!(cpu.pc, Addr(CODE.0 + 56));
+        assert_eq!(cpu.pc, Addr(CODE.0 + 64));
         assert_eq!(cpu.v[0], u128::from((-2.0f64.powi(-54)).to_bits()));
         assert_eq!(cpu.v[3], u128::from(f32::NAN.to_bits()));
         assert_eq!(cpu.v[1], u128::from((-3.0f64).to_bits()));
@@ -218,6 +221,8 @@ fn floating_point_and_vector_lanes_match_on_both_backends() {
             u128::from(f64::from(f32::from_bits(cpu.v[8] as u32)).to_bits())
         );
         assert_eq!(cpu.v[15], u128::from((-3.0f32).to_bits()));
+        assert_eq!(cpu.v[16], u128::from(f32::NAN.to_bits()));
+        assert_eq!(cpu.nzcv, 0x8000_0000);
         let mut lane = [0; 4];
         memory.read(DATA, &mut lane).unwrap();
         assert_eq!(u32::from_le_bytes(lane), 0xffff_ff00);

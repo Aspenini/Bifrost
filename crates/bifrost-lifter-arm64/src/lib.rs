@@ -55,9 +55,9 @@ pub enum LiftError {
         pc: GuestAddress,
         operation: bifrost_decoder_arm64::FloatCompare,
     },
-    FloatSign {
+    FloatUnary {
         pc: GuestAddress,
-        operation: bifrost_decoder_arm64::FloatSign,
+        operation: bifrost_decoder_arm64::FloatUnary,
     },
     FloatConvert {
         pc: GuestAddress,
@@ -99,8 +99,8 @@ impl fmt::Display for LiftError {
             Self::FloatCompare { pc, .. } => {
                 write!(f, "ARM64 scalar floating-point comparison at {:#x}", pc.0)
             }
-            Self::FloatSign { pc, .. } => {
-                write!(f, "ARM64 floating-point sign operation at {:#x}", pc.0)
+            Self::FloatUnary { pc, .. } => {
+                write!(f, "ARM64 floating-point unary operation at {:#x}", pc.0)
             }
             Self::IntegerToFloat { pc, .. } => {
                 write!(f, "ARM64 integer-to-float conversion at {:#x}", pc.0)
@@ -661,8 +661,8 @@ impl Arm64Lifter {
             Operation::FloatCompare(operation) => {
                 return Err(LiftError::FloatCompare { pc, operation });
             }
-            Operation::FloatSign(operation) => {
-                return Err(LiftError::FloatSign { pc, operation });
+            Operation::FloatUnary(operation) => {
+                return Err(LiftError::FloatUnary { pc, operation });
             }
             Operation::FloatConvert(operation) => {
                 return Err(LiftError::FloatConvert { pc, operation });

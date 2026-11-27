@@ -230,11 +230,14 @@ fn report_lift_failure(
             return Ok(ExitReason::Dispatch(cpu.pc));
         }
         #[cfg(feature = "guest-aarch64")]
-        ExecutionError::Arm64Lift(bifrost_lifter_arm64::LiftError::FloatSign { pc, operation }) => {
+        ExecutionError::Arm64Lift(bifrost_lifter_arm64::LiftError::FloatUnary {
+            pc,
+            operation,
+        }) => {
             let bifrost_core::CpuState::AArch64(cpu) = &mut thread.cpu else {
                 unreachable!("ARM64 instruction requires ARM64 state");
             };
-            arm64_float::sign(cpu, pc, operation)?;
+            arm64_float::unary(cpu, pc, operation)?;
             return Ok(ExitReason::Dispatch(cpu.pc));
         }
         #[cfg(feature = "guest-aarch64")]

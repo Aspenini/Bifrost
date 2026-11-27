@@ -57,15 +57,29 @@ pub struct FloatCompare {
     pub rhs: Option<u8>,
     pub double: bool,
     pub signal_quiet_nan: bool,
+    pub when: Option<CompareCondition>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct FloatSign {
+pub struct CompareCondition {
+    pub code: u8,
+    pub fallback_nzcv: u8,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FloatUnary {
     pub dst: u8,
     pub src: u8,
     pub lanes: u8,
     pub double: bool,
-    pub negate: bool,
+    pub kind: FloatUnaryKind,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FloatUnaryKind {
+    Absolute,
+    Negate,
+    SquareRoot,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -404,7 +418,7 @@ pub enum Operation {
     IntegerToFloat(IntegerToFloat),
     FloatBinary(FloatBinary),
     FloatCompare(FloatCompare),
-    FloatSign(FloatSign),
+    FloatUnary(FloatUnary),
     FloatConvert(FloatConvert),
     Crc32(Crc32),
     Branch {
@@ -792,7 +806,8 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
             writeback,
         };
     }
-    let scalar_sign = matches!(word & 0xffbf_fc00, 0x1e20_c000 | 0x1e21_4000);
+    let scalar_opcode = word & 0xffbf_fc00;
+    let scalar_sign = matches!(scalar_opcode, 0x1e20_c000 | 0x1e21_4000 | 0x1e21_c000);
     let vector_sign = word & 0x9fbf_fc00 == 0x0ea0_f800;
     if scalar_sign || vector_sign {
         let double = word & (1 << 22) != 0;
@@ -800,7 +815,7 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
         if vector_sign && double && !quad {
             return Operation::Undefined;
         }
-        return Operation::FloatSign(FloatSign {
+        return Operation::FloatUnary(FloatUnary {
             dst: (word & 31) as u8,
             src: ((word >> 5) & 31) as u8,
             lanes: if scalar_sign {
@@ -811,11 +826,27 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
                 2
             },
             double,
-            negate: if scalar_sign {
-                word & (1 << 16) != 0
+            kind: if scalar_opcode == 0x1e21_c000 {
+                FloatUnaryKind::SquareRoot
+            } else if (scalar_sign && scalar_opcode == 0x1e21_4000)
+                || (vector_sign && word & (1 << 29) != 0)
+            {
+                FloatUnaryKind::Negate
             } else {
-                word & (1 << 29) != 0
+                FloatUnaryKind::Absolute
             },
+        });
+    }
+    if word & 0xffa0_0c00 == 0x1e20_0400 {
+        return Operation::FloatCompare(FloatCompare {
+            lhs: ((word >> 5) & 31) as u8,
+            rhs: Some(((word >> 16) & 31) as u8),
+            double: word & (1 << 22) != 0,
+            signal_quiet_nan: word & 16 != 0,
+            when: Some(CompareCondition {
+                code: ((word >> 12) & 15) as u8,
+                fallback_nzcv: (word & 15) as u8,
+            }),
         });
     }
     if word & 0xffa0_fc07 == 0x1e20_2000 {
@@ -829,6 +860,7 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
             rhs: (!zero).then_some(rhs),
             double: word & (1 << 22) != 0,
             signal_quiet_nan: word & 16 != 0,
+            when: None,
         });
     }
     if word & 0x7fa0_0000 == 0x1380_0000 {
