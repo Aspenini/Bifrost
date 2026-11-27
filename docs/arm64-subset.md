@@ -11,6 +11,7 @@ The raw profile uses little-endian A64 instructions and serialized execution ove
 | Logical | 32-bit and 64-bit AND, ORR, EOR and ANDS with a bitmask immediate or shifted register, plus shifted-register BIC, ORN, EON and BICS |
 | Bitfield | 32-bit and 64-bit BFM, SBFM and UBFM, including immediate shift and sign-extension aliases. EXTR includes the immediate ROR alias. |
 | Bit operations | 32-bit and 64-bit RBIT, CLZ, and CLS |
+| Checksums | CRC32 and CRC32C with byte, halfword, word, and doubleword input. |
 | Variable shifts | 32-bit and 64-bit LSLV, LSRV, ASRV and RORV |
 | Conditional select | 32-bit and 64-bit CSEL, CSINC, CSINV and CSNEG |
 | Conditional compare | 32-bit and 64-bit CCMP and CCMN with a register or immediate |

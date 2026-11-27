@@ -59,6 +59,10 @@ pub enum LiftError {
         pc: GuestAddress,
         operation: bifrost_decoder_arm64::FloatSign,
     },
+    Crc32 {
+        pc: GuestAddress,
+        operation: bifrost_decoder_arm64::Crc32,
+    },
     UnsupportedInstruction {
         pc: GuestAddress,
         word: u32,
@@ -97,6 +101,7 @@ impl fmt::Display for LiftError {
             Self::IntegerToFloat { pc, .. } => {
                 write!(f, "ARM64 integer-to-float conversion at {:#x}", pc.0)
             }
+            Self::Crc32 { pc, .. } => write!(f, "ARM64 CRC32 at {:#x}", pc.0),
             Self::UnsupportedInstruction { pc, word, features } => write!(
                 f,
                 "unsupported ARM64 instruction {word:#010x} at {:#x} ({features:?})",
@@ -707,6 +712,9 @@ impl Arm64Lifter {
                     ir.write(base, updated);
                 }
                 ir.next(next)
+            }
+            Operation::Crc32(operation) => {
+                return Err(LiftError::Crc32 { pc, operation });
             }
             Operation::MoveVectorImmediate { vector, bits } => {
                 let value = ir.value(|out| Op::Const {

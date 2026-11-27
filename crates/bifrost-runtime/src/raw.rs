@@ -10,6 +10,8 @@ use bifrost_ir::{InstructionLifter, IrFunction, VerifyError};
 use std::fmt;
 
 #[cfg(feature = "guest-aarch64")]
+mod arm64_crc;
+#[cfg(feature = "guest-aarch64")]
 mod arm64_float;
 #[cfg(feature = "jit-cranelift")]
 mod jit;
@@ -175,6 +177,14 @@ fn report_lift_failure(
             register,
             rt,
         }) => return Ok(ExitReason::Arm64ReadCounter { pc, register, rt }),
+        #[cfg(feature = "guest-aarch64")]
+        ExecutionError::Arm64Lift(bifrost_lifter_arm64::LiftError::Crc32 { pc, operation }) => {
+            let bifrost_core::CpuState::AArch64(cpu) = &mut thread.cpu else {
+                unreachable!("ARM64 instruction requires ARM64 state");
+            };
+            arm64_crc::execute(cpu, pc, operation);
+            return Ok(ExitReason::Dispatch(cpu.pc));
+        }
         #[cfg(feature = "guest-aarch64")]
         ExecutionError::Arm64Lift(bifrost_lifter_arm64::LiftError::FloatMultiplyAdd {
             pc,

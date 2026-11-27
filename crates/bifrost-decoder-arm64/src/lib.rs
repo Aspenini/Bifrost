@@ -8,6 +8,15 @@ use std::fmt;
 pub const INSTRUCTION_BYTES: u64 = 4;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Crc32 {
+    pub dst: u8,
+    pub accumulator: u8,
+    pub input: u8,
+    pub bytes: u8,
+    pub castagnoli: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct FloatMultiplyAdd {
     pub dst: u8,
     pub lhs: u8,
@@ -384,6 +393,7 @@ pub enum Operation {
     FloatBinary(FloatBinary),
     FloatCompare(FloatCompare),
     FloatSign(FloatSign),
+    Crc32(Crc32),
     Branch {
         target: GuestAddress,
         link: bool,
@@ -821,6 +831,19 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
             shift,
             word: !wide,
         };
+    }
+    if word & 0x7fe0_e000 == 0x1ac0_4000 {
+        let size = ((word >> 10) & 3) as u8;
+        if (word >> 31 != 0) != (size == 3) {
+            return Operation::Undefined;
+        }
+        return Operation::Crc32(Crc32 {
+            dst: (word & 31) as u8,
+            accumulator: ((word >> 5) & 31) as u8,
+            input: ((word >> 16) & 31) as u8,
+            bytes: 1 << size,
+            castagnoli: word & (1 << 12) != 0,
+        });
     }
     let binary = match word & 0xffa0_fc00 {
         0x1e20_0800 => Some(FloatBinaryKind::Multiply),
