@@ -356,6 +356,12 @@ pub enum Op {
         addend: ValueId,
         layout: MemoryLayout,
     },
+    AtomicClear {
+        out: ValueId,
+        guard: ValueId,
+        mask: ValueId,
+        layout: MemoryLayout,
+    },
     /// Read one contiguous 16-byte range into two little-endian scalar values.
     LoadPair64 {
         first: ValueId,

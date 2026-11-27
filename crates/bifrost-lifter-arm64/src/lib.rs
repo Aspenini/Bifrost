@@ -590,7 +590,15 @@ impl Arm64Lifter {
             }
             Operation::AtomicAdd {
                 dst,
-                addend,
+                addend: operand,
+                base,
+                size_log2,
+                acquire,
+                release,
+            }
+            | Operation::AtomicClear {
+                dst,
+                mask: operand,
                 base,
                 size_log2,
                 acquire,
@@ -610,16 +618,27 @@ impl Arm64Lifter {
                     access: MemoryAccess::Write,
                     layout,
                 });
-                let addend = ir.read(addend);
-                let addend = ir.cast(addend, ty);
+                let operand = ir.read(operand);
+                let operand = ir.cast(operand, ty);
                 if release {
                     ir.emit(Op::Fence);
                 }
-                let result = ir.value(|out| Op::AtomicAdd {
-                    out,
-                    guard,
-                    addend,
-                    layout,
+                let result = ir.value(|out| {
+                    if matches!(instruction.operation(), Operation::AtomicClear { .. }) {
+                        Op::AtomicClear {
+                            out,
+                            guard,
+                            mask: operand,
+                            layout,
+                        }
+                    } else {
+                        Op::AtomicAdd {
+                            out,
+                            guard,
+                            addend: operand,
+                            layout,
+                        }
+                    }
                 });
                 if acquire {
                     ir.emit(Op::Fence);

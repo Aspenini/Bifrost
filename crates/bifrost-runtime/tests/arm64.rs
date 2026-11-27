@@ -1070,7 +1070,16 @@ fn compare_exchange_returns_the_old_value_and_faults_before_writeback() {
 
 #[test]
 fn atomic_add_returns_the_old_value_and_wraps_at_the_access_width() {
-    let (mut memory, mut thread) = memory_and_thread(&[0xb8e1_0002], Protection::ReadWrite);
+    check_atomic_update(0xb8e1_0002, [1, 0, 0, 0, 0x66]);
+}
+
+#[test]
+fn atomic_clear_returns_the_old_value_and_only_clears_selected_bits() {
+    check_atomic_update(0xb8e1_1002, [0xfd, 0xff, 0xff, 0xff, 0x66]);
+}
+
+fn check_atomic_update(word: u32, expected: [u8; 5]) {
+    let (mut memory, mut thread) = memory_and_thread(&[word], Protection::ReadWrite);
     let initial = [0xff, 0xff, 0xff, 0xff, 0x66];
     memory.write(DATA, &initial).unwrap();
     let CpuState::AArch64(cpu) = &mut thread.cpu else {
@@ -1087,7 +1096,7 @@ fn atomic_add_returns_the_old_value_and_wraps_at_the_access_width() {
         assert_eq!(state(thread).x[1..3], [2, u64::from(u32::MAX)]);
         let mut bytes = [0; 5];
         memory.read(DATA, &mut bytes).unwrap();
-        assert_eq!(bytes, [1, 0, 0, 0, 0x66]);
+        assert_eq!(bytes, expected);
     };
     assert_eq!(exit, ExitReason::Dispatch(Addr(CODE.0 + 4)));
     check(&thread, &memory);

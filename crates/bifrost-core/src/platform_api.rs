@@ -74,6 +74,19 @@ pub trait GuestMemory: GuestMemoryRead {
         )?;
         Ok(previous)
     }
+
+    /// Clears the selected bits in a little-endian scalar and returns the old value.
+    /// Shared backing stores must override this method to serialize the entire operation.
+    fn fetch_clear_le(
+        &mut self,
+        address: GuestAddress,
+        width: usize,
+        mask: u64,
+    ) -> Result<u64, MemoryError> {
+        let previous = u64::from_le_bytes(read_atomic_value(self, address, width)?);
+        self.write(address, &(previous & !mask).to_le_bytes()[..width])?;
+        Ok(previous)
+    }
 }
 
 fn read_atomic_value(

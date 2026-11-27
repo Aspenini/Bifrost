@@ -245,6 +245,20 @@ pub(crate) fn instruction(
                 .map_err(|err| memory_error(pc, thread, AccessKind::Write, err))?;
             (out, Value::new(layout.ty, u128::from(previous)))
         }
+        Op::AtomicClear {
+            out,
+            guard,
+            mask,
+            layout,
+        } => {
+            let address = guarded_address(locals, guard);
+            let width = check_access(pc, thread, address, AccessKind::Write, layout)?;
+            let mask = data(locals, mask).bits as u64;
+            let previous = memory
+                .fetch_clear_le(address, width, mask)
+                .map_err(|err| memory_error(pc, thread, AccessKind::Write, err))?;
+            (out, Value::new(layout.ty, u128::from(previous)))
+        }
         Op::StorePair64 {
             first,
             second,

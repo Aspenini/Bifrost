@@ -463,10 +463,16 @@ impl Values {
             Op::AtomicAdd {
                 out,
                 guard,
-                addend,
+                addend: operand,
+                layout,
+            }
+            | Op::AtomicClear {
+                out,
+                guard,
+                mask: operand,
                 layout,
             } => {
-                self.expect(addend, layout.ty)?;
+                self.expect(operand, layout.ty)?;
                 self.consume_atomic_guard(guard, layout, pc)?;
                 (out, layout.ty)
             }
