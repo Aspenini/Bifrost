@@ -30,7 +30,20 @@ fn an_in_place_reservation_preserves_data_and_requires_a_complete_release() {
     assert!(memory.release_reserved_pages(start, 4096).is_err());
     assert_eq!(memory.mapped_pages(), 2);
 
+    assert!(
+        memory
+            .write_reserved(start, 4096, 0, b"wrong range")
+            .is_err()
+    );
+    assert!(memory.write_reserved(start, 8192, 8191, b"out").is_err());
+    memory.write_reserved(start, 8192, 4094, b"shared").unwrap();
+    let mut shared = [0; 6];
+    memory.read(Addr(start.0 + 4094), &mut shared).unwrap();
+    assert_eq!(&shared, b"shared");
+    assert!(memory.write(start, b"busy").is_err());
+
     memory.release_reserved_pages(start, 8192).unwrap();
+    assert!(memory.write_reserved(start, 8192, 0, b"closed").is_err());
     memory.read(start, &mut bytes).unwrap();
     assert_eq!(&bytes, b"keep");
     memory.write(start, b"done").unwrap();

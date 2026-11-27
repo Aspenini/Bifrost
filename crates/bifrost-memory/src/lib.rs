@@ -553,25 +553,32 @@ impl AddressSpace {
         }
         Ok(())
     }
-}
-
-impl GuestMemoryRead for AddressSpace {
-    fn read(&self, address: GuestAddress, output: &mut [u8]) -> Result<(), MemoryError> {
-        self.copy_out(address, output, AccessKind::Read)
+    /// Write from the service side of a live in-place reservation.
+    /// The full write must stay in that reservation. Guest permissions are unchanged.
+    pub fn write_reserved(
+        &mut self,
+        start: GuestAddress,
+        len: u64,
+        offset: u64,
+        bytes: &[u8],
+    ) -> Result<(), MemoryError> {
+        let loan = Some(PageLoan::InPlace { start, len });
+        if self.page_loan_at(start) != loan
+            || offset
+                .checked_add(bytes.len() as u64)
+                .is_none_or(|end| end > len)
+        {
+            return Err(MemoryError::InvalidPageLoan(start));
+        }
+        // In-place reservations cannot be changed or released in subranges.
+        // A valid reservation covers every byte of this write.
+        if bytes.is_empty() {
+            return Ok(());
+        }
+        self.write_mapped(GuestAddress(start.0 + offset), bytes)
     }
 
-    fn fetch(&self, address: GuestAddress, output: &mut [u8]) -> Result<(), MemoryError> {
-        self.copy_out(address, output, AccessKind::Execute)
-    }
-}
-
-impl GuestMemory for AddressSpace {
-    fn check_write(&self, address: GuestAddress, len: usize) -> Result<(), MemoryError> {
-        self.validate(address, len, AccessKind::Write)
-    }
-
-    fn write(&mut self, address: GuestAddress, bytes: &[u8]) -> Result<(), MemoryError> {
-        self.validate(address, bytes.len(), AccessKind::Write)?;
+    fn write_mapped(&mut self, address: GuestAddress, bytes: &[u8]) -> Result<(), MemoryError> {
         if bytes.is_empty() {
             return Ok(());
         }
@@ -606,5 +613,26 @@ impl GuestMemory for AddressSpace {
         }
         self.generation = generation;
         Ok(())
+    }
+}
+
+impl GuestMemoryRead for AddressSpace {
+    fn read(&self, address: GuestAddress, output: &mut [u8]) -> Result<(), MemoryError> {
+        self.copy_out(address, output, AccessKind::Read)
+    }
+
+    fn fetch(&self, address: GuestAddress, output: &mut [u8]) -> Result<(), MemoryError> {
+        self.copy_out(address, output, AccessKind::Execute)
+    }
+}
+
+impl GuestMemory for AddressSpace {
+    fn check_write(&self, address: GuestAddress, len: usize) -> Result<(), MemoryError> {
+        self.validate(address, len, AccessKind::Write)
+    }
+
+    fn write(&mut self, address: GuestAddress, bytes: &[u8]) -> Result<(), MemoryError> {
+        self.validate(address, bytes.len(), AccessKind::Write)?;
+        self.write_mapped(address, bytes)
     }
 }
