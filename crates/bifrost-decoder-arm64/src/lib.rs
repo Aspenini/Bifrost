@@ -520,6 +520,7 @@ pub enum Operation {
     },
     PointerAuth(Arm64PointerAuth),
     Fence,
+    InstructionSyncBarrier,
     Undefined,
     Unsupported,
 }
@@ -755,9 +756,12 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
     if word & 0xffff_f0ff == 0xd503_30bf {
         return Operation::Fence; // DMB, modeled as a full fence.
     }
-    if word == 0xd503_3f9f {
-        // DSB SY. Guest memory accesses complete synchronously in this profile.
+    if matches!(word, 0xd503_3b9f | 0xd503_3f9f) {
+        // DSB ISH and SY. Guest memory accesses complete synchronously in this profile.
         return Operation::Fence;
+    }
+    if word == 0xd503_3fdf {
+        return Operation::InstructionSyncBarrier;
     }
     if word & 0xffe0_001f == 0xd400_0001 {
         return Operation::SupervisorCall {

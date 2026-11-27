@@ -1283,6 +1283,9 @@ impl Arm64Lifter {
                 ir.emit(Op::Fence);
                 ir.next(next)
             }
+            // The raw executor dispatches one guest instruction per block and
+            // checks code generations before reusing translated instructions.
+            Operation::InstructionSyncBarrier => ir.next(next),
             Operation::Undefined => Exit::Fault(FaultClass::IllegalInstruction),
             _ => {
                 return Err(LiftError::UnsupportedInstruction {

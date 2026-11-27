@@ -27,7 +27,7 @@ The raw profile uses little-endian A64 instructions and serialized execution ove
 | Floating-point precision and unary operations | Scalar FSQRT and FCVT between binary32 and binary64. FABS and FNEG for scalars and 2S/4S/2D vectors in the supported FPCR profile. |
 | Integer and floating-point conversions | Unscaled SCVTF, UCVTF, FCVTZS, and FCVTZU with binary32 or binary64 and W/X registers or SIMD S/D, 2S/4S/2D lanes. Float-to-integer conversions saturate and update cumulative exception flags. |
 | Branch | B, BL, B.cond, BR, BLR, 32-bit and 64-bit CBZ/CBNZ, TBZ/TBNZ, RET Xn |
-| Miscellaneous | NOP, DMB ISH, UDF |
+| Miscellaneous | NOP, DMB ISH, DSB ISH, DSB SY, ISB SY, UDF. ISB uses the raw runtime's instruction boundary and translated-code generation checks. |
 | Supervisor call | SVC with a 16-bit immediate, reported to the caller as an execution exit |
 | Pointer authentication | Register PAC/AUT, PACIASP/PACIBSP, AUTIASP/AUTIBSP, RETAA/RETAB and XPACI/XPACD/XPACLRI produce typed host exits before modifying guest state |
 

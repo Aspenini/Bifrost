@@ -17,6 +17,7 @@ fn emits_verified_ir_with_arm64_pc_at_every_effect() {
         0x9400_0002,     // bl +8
         0xd65f_03c0,     // ret
         0xd503_3bbf,     // dmb ish
+        0xd503_3fdf,     // isb
         0x0000_0000,     // udf #0
     ] {
         let pc = Addr(0x1000);
@@ -32,6 +33,13 @@ fn emits_verified_ir_with_arm64_pc_at_every_effect() {
         assert!(block.as_ref().instructions.iter().all(|inst| inst.pc == pc));
         if word == 0xd503_3bbf {
             assert!(matches!(block.as_ref().instructions[0].op, Op::Fence));
+        }
+        if word == 0xd503_3fdf {
+            let [next_pc] = block.as_ref().instructions.as_slice() else {
+                panic!("ISB should only advance the guest PC");
+            };
+            assert!(matches!(next_pc.op, Op::Const { .. }));
+            assert!(matches!(block.as_ref().exit, Exit::NextPc(_)));
         }
         if word == 0 {
             assert_eq!(

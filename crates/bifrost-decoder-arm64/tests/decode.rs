@@ -70,7 +70,9 @@ fn rejects_other_forms_and_unaligned_fetches() {
     assert_eq!(op(0xd400_0002), Operation::Unsupported); // hvc #0
     assert_eq!(op(0x0000_1234), Operation::Undefined);
     assert_eq!(op(0xd503_3bbf), Operation::Fence);
+    assert_eq!(op(0xd503_3b9f), Operation::Fence);
     assert_eq!(op(0xd503_3f9f), Operation::Fence);
+    assert_eq!(op(0xd503_3fdf), Operation::InstructionSyncBarrier);
     assert_eq!(
         decode([0; 4], Addr(1)),
         Err(DecodeError::Alignment(Addr(1)))
