@@ -228,6 +228,13 @@ pub enum Operation {
         len: u8,
         word: bool,
     },
+    Extract {
+        dst: Reg,
+        high: Reg,
+        low: Reg,
+        shift: u8,
+        word: bool,
+    },
     ReverseBits {
         dst: Reg,
         src: Reg,
@@ -800,6 +807,20 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
             double: word & (1 << 22) != 0,
             signal_quiet_nan: word & 16 != 0,
         });
+    }
+    if word & 0x7fa0_0000 == 0x1380_0000 {
+        let wide = word >> 31 != 0;
+        let shift = ((word >> 10) & 63) as u8;
+        if (word & (1 << 22) != 0) != wide || (!wide && shift >= 32) {
+            return Operation::Undefined;
+        }
+        return Operation::Extract {
+            dst,
+            high: lhs,
+            low: reg(word >> 16, false),
+            shift,
+            word: !wide,
+        };
     }
     let binary = match word & 0xffa0_fc00 {
         0x1e20_0800 => Some(FloatBinaryKind::Multiply),

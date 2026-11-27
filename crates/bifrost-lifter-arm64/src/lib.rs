@@ -208,6 +208,30 @@ impl Arm64Lifter {
                 ir.logical(kind, dst, lhs, rhs, word);
                 ir.next(next)
             }
+            Operation::Extract {
+                dst,
+                high,
+                low,
+                shift,
+                word,
+            } => {
+                let low = ir.read(low);
+                let low = ir.shift_register(low, RegisterShift::LogicalRight, shift, word);
+                let result = if shift == 0 {
+                    if word {
+                        ir.extend_register(low, 32, false)
+                    } else {
+                        low
+                    }
+                } else {
+                    let high = ir.read(high);
+                    let width = if word { 32 } else { 64 };
+                    let high = ir.shift_register(high, RegisterShift::Left, width - shift, word);
+                    ir.binary(IntOp::Or, high, low)
+                };
+                ir.write(dst, result);
+                ir.next(next)
+            }
             Operation::Bitfield {
                 kind,
                 dst,

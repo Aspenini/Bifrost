@@ -9,7 +9,7 @@ The raw profile uses little-endian A64 instructions and serialized execution ove
 | Multiply | 32-bit and 64-bit MADD and MSUB, including MUL and MNEG |
 | Address generation | ADR and ADRP |
 | Logical | 32-bit and 64-bit AND, ORR, EOR and ANDS with a bitmask immediate or shifted register, plus shifted-register BIC, ORN, EON and BICS |
-| Bitfield | 32-bit and 64-bit BFM, SBFM and UBFM, including immediate shift and sign-extension aliases |
+| Bitfield | 32-bit and 64-bit BFM, SBFM and UBFM, including immediate shift and sign-extension aliases. EXTR includes the immediate ROR alias. |
 | Bit operations | 32-bit and 64-bit RBIT, CLZ, and CLS |
 | Variable shifts | 32-bit and 64-bit LSLV, LSRV, ASRV and RORV |
 | Conditional select | 32-bit and 64-bit CSEL, CSINC, CSINV and CSNEG |
