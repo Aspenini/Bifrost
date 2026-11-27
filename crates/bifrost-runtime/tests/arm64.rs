@@ -161,6 +161,10 @@ fn floating_point_and_vector_lanes_match_on_both_backends() {
                 0xd51b_443f, // msr fpsr,xzr
                 0x1e61_0b39, // fmul d25,d25,d1 (default NaN enabled)
                 0xd53b_442c, // mrs x12,fpsr
+                0x4e21_db5b, // scvtf v27.4s,v26.4s
+                0x4ea1_bb7c, // fcvtzs v28.4s,v27.4s
+                0x7e21_db5d, // ucvtf s29,s26
+                0x9e38_036e, // fcvtzs x14,s27
             ],
             Protection::ReadWrite,
         );
@@ -174,13 +178,15 @@ fn floating_point_and_vector_lanes_match_on_both_backends() {
         cpu.v[3] = u128::from(f32::INFINITY.to_bits());
         cpu.v[7] = 0xdead_beef_0123_4567_89ab_cdef_cafe_babe;
         cpu.v[25] = 0x7ff0_0000_0000_0001;
+        cpu.v[26] = 0xffff_fffc_0000_0003_ffff_fffe_0000_0001;
+        cpu.v[29] = u128::MAX;
         cpu.x[19] = 0x1234_5678_ffff_fffd;
         cpu.x[20] = 0xffff_ffff_0200_0040;
         cpu.x[12] = 0x1234_5678_9988_7766;
         // The binary32 instruction multiplies infinity by the zero in V4.
         cpu.fpsr = 1 << 27;
         cpu.nzcv = 0x4000_0000;
-        let budget = ExecutionBudget { instructions: 25 };
+        let budget = ExecutionBudget { instructions: 29 };
         let mut trace = Trace::default();
         let interpret = |memory: &mut AddressSpace, thread: &mut GuestThread, trace: &mut Trace| {
             RawInterpreter::new(&target(), memory, trace)
@@ -209,9 +215,9 @@ fn floating_point_and_vector_lanes_match_on_both_backends() {
         )))]
         let stop = interpret(&mut memory, &mut thread, &mut trace);
         assert_eq!(stop, ExitReason::BudgetExhausted);
-        assert_eq!(trace.0.len(), 25);
+        assert_eq!(trace.0.len(), 29);
         let cpu = state(&thread);
-        assert_eq!(cpu.pc, Addr(CODE.0 + 100));
+        assert_eq!(cpu.pc, Addr(CODE.0 + 116));
         assert_eq!(cpu.v[0], u128::from((-2.0f64.powi(-54)).to_bits()));
         assert_eq!(cpu.v[3], u128::from(f32::NAN.to_bits()));
         assert_eq!(cpu.v[1], u128::from((-3.0f64).to_bits()));
@@ -240,6 +246,10 @@ fn floating_point_and_vector_lanes_match_on_both_backends() {
         assert_eq!(cpu.v[23], u128::from((-6.0f64).to_bits()));
         assert_eq!(cpu.v[24], u128::from(12.0f64.to_bits()));
         assert_eq!(cpu.v[25], u128::from(f64::NAN.to_bits()));
+        assert_eq!(cpu.v[27], 0xc080_0000_4040_0000_c000_0000_3f80_0000);
+        assert_eq!(cpu.v[28], cpu.v[26]);
+        assert_eq!(cpu.v[29], u128::from(1.0f32.to_bits()));
+        assert_eq!(cpu.x[14], 1);
         let mut lane = [0; 4];
         memory.read(DATA, &mut lane).unwrap();
         assert_eq!(u32::from_le_bytes(lane), 0xffff_ff00);

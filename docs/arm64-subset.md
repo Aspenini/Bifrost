@@ -25,7 +25,7 @@ The raw profile uses little-endian A64 instructions and serialized execution ove
 | SIMD lanes | Single-register LD1/ST1 for one B/H/S/D lane, including immediate and register post-index forms. |
 | Floating-point system registers | MRS and MSR for FPCR and FPSR in the base AArch64 profile. Guest writes ignore reserved bits. |
 | Floating-point precision and unary operations | Scalar FSQRT and FCVT between binary32 and binary64. FABS and FNEG for scalars and 2S/4S/2D vectors in the supported FPCR profile. |
-| Float-to-integer conversions | Unscaled FCVTZS and FCVTZU from binary32 or binary64 to W/X registers, with saturation and cumulative exception flags. |
+| Integer and floating-point conversions | Unscaled SCVTF, UCVTF, FCVTZS, and FCVTZU with binary32 or binary64 and W/X registers or SIMD S/D, 2S/4S/2D lanes. Float-to-integer conversions saturate and update cumulative exception flags. |
 | Branch | B, BL, B.cond, BR, BLR, 32-bit and 64-bit CBZ/CBNZ, TBZ/TBNZ, RET Xn |
 | Miscellaneous | NOP, DMB ISH, UDF |
 | Supervisor call | SVC with a 16-bit immediate, reported to the caller as an execution exit |

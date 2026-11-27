@@ -45,8 +45,40 @@ pub(super) fn integer_to_float(
     op: IntegerToFloat,
 ) -> Result<(), ExecutionError> {
     check_control(cpu, pc)?;
-    let register = cpu.x.get(usize::from(op.src)).copied().unwrap_or(0);
-    let (sign, magnitude) = match (op.signed, op.word) {
+    let format = if op.double {
+        Format::DOUBLE
+    } else {
+        Format::SINGLE
+    };
+    let mut result = 0;
+    let mut flags = 0;
+    let width = if op.double { 64 } else { 32 };
+    let src = usize::from(op.src);
+    for lane in 0..op.lanes.max(1) {
+        let shift = u32::from(lane) * width;
+        let bits = if op.lanes == 0 {
+            cpu.x.get(src).copied().unwrap_or(0)
+        } else {
+            (cpu.v[src] >> shift) as u64
+        };
+        let (bits, status) = integer_lane_to_float(format, bits, op.signed, op.word, cpu.fpcr);
+        result |= u128::from(bits) << shift;
+        flags |= status;
+    }
+    cpu.v[usize::from(op.dst)] = result;
+    cpu.fpsr |= flags;
+    cpu.pc = GuestAddress(pc.0.wrapping_add(4));
+    Ok(())
+}
+
+fn integer_lane_to_float(
+    format: Format,
+    register: u64,
+    signed: bool,
+    word: bool,
+    fpcr: u32,
+) -> (u64, u32) {
+    let (sign, magnitude) = match (signed, word) {
         (true, true) => {
             let value = register as i32;
             (value < 0, u64::from(value.unsigned_abs()))
@@ -58,25 +90,12 @@ pub(super) fn integer_to_float(
         (false, true) => (false, u64::from(register as u32)),
         (false, false) => (false, register),
     };
-    let format = if op.double {
-        Format::DOUBLE
-    } else {
-        Format::SINGLE
-    };
-    let (bits, flags) = if magnitude == 0 {
+    if magnitude == 0 {
         (0, 0)
     } else {
         let top = (63 - magnitude.leading_zeros()) as usize;
-        format.round(
-            Wide::shifted(u128::from(magnitude), 0),
-            top,
-            0,
-            sign,
-            cpu.fpcr,
-        )
-    };
-    write_result(cpu, pc, op.dst, bits, flags);
-    Ok(())
+        format.round(Wide::shifted(u128::from(magnitude), 0), top, 0, sign, fpcr)
+    }
 }
 
 fn check_control(cpu: &Arm64State, pc: GuestAddress) -> Result<(), ExecutionError> {
@@ -97,9 +116,32 @@ pub(super) fn float_to_integer(
     } else {
         Format::SINGLE
     };
-    let operand = format.unpack_input(cpu.v[usize::from(op.src)] as u64, cpu.fpcr, &mut cpu.fpsr);
     let width = if op.word { 32 } else { 64 };
-    let (integer, flags) = if format.is_nan(operand) {
+    let src = cpu.v[usize::from(op.src)];
+    let mut result = 0;
+    for lane in 0..op.lanes.max(1) {
+        let shift = u32::from(lane) * width;
+        let operand = format.unpack_input((src >> shift) as u64, cpu.fpcr, &mut cpu.fpsr);
+        let (integer, flags) = float_lane_to_integer(format, operand, width, op.signed);
+        let bits = if op.word {
+            u64::from(integer as u32)
+        } else {
+            integer
+        };
+        result |= u128::from(bits) << shift;
+        cpu.fpsr |= flags;
+    }
+    if op.lanes != 0 {
+        cpu.v[usize::from(op.dst)] = result;
+    } else if let Some(dst) = cpu.x.get_mut(usize::from(op.dst)) {
+        *dst = result as u64;
+    }
+    cpu.pc = GuestAddress(pc.0.wrapping_add(4));
+    Ok(())
+}
+
+fn float_lane_to_integer(format: Format, operand: Operand, width: u32, signed: bool) -> (u64, u32) {
+    if format.is_nan(operand) {
         (0, INVALID)
     } else {
         let (fraction, exponent) = format.finite(operand);
@@ -114,7 +156,7 @@ pub(super) fn float_to_integer(
                 let discarded = fraction != truncated.checked_shl(shift).unwrap_or(0);
                 (u128::from(truncated), discarded)
             };
-        let limit = match (op.signed, operand.sign) {
+        let limit = match (signed, operand.sign) {
             (true, true) => 1u128 << (width - 1),
             (true, false) => (1u128 << (width - 1)) - 1,
             (false, true) => 0,
@@ -134,17 +176,7 @@ pub(super) fn float_to_integer(
             magnitude
         };
         (bits, flags)
-    };
-    if let Some(dst) = cpu.x.get_mut(usize::from(op.dst)) {
-        *dst = if op.word {
-            u64::from(integer as u32)
-        } else {
-            integer
-        };
     }
-    cpu.fpsr |= flags;
-    cpu.pc = GuestAddress(pc.0.wrapping_add(4));
-    Ok(())
 }
 
 pub(super) fn convert(
@@ -863,6 +895,7 @@ mod tests {
                     word,
                     double: true,
                     signed,
+                    lanes: 0,
                 },
             )
             .unwrap();

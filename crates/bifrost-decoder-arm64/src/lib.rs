@@ -34,6 +34,8 @@ pub struct IntegerToFloat {
     pub word: bool,
     pub double: bool,
     pub signed: bool,
+    /// Zero selects a general-purpose source. Otherwise this is the SIMD lane count.
+    pub lanes: u8,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -43,6 +45,8 @@ pub struct FloatToInteger {
     pub word: bool,
     pub double: bool,
     pub signed: bool,
+    /// Zero selects a general-purpose destination. Otherwise this is the SIMD lane count.
+    pub lanes: u8,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -947,6 +951,7 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
             word: word >> 31 == 0,
             double: word & (1 << 22) != 0,
             signed: word & (1 << 16) == 0,
+            lanes: 0,
         });
     }
     if word & 0x7fbe_fc00 == 0x1e38_0000 {
@@ -956,7 +961,49 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
             word: word >> 31 == 0,
             double: word & (1 << 22) != 0,
             signed: word & (1 << 16) == 0,
+            lanes: 0,
         });
+    }
+    let conversion = word & 0x9fbf_fc00;
+    if matches!(
+        conversion,
+        0x0e21_d800 | 0x0ea1_b800 | 0x1e21_d800 | 0x1ea1_b800
+    ) {
+        let scalar = word & (1 << 28) != 0;
+        let quad = word & (1 << 30) != 0;
+        let double = word & (1 << 22) != 0;
+        if (scalar || double) && !quad {
+            return Operation::Undefined;
+        }
+        let lanes = if scalar {
+            1
+        } else if quad && !double {
+            4
+        } else {
+            2
+        };
+        let dst = (word & 31) as u8;
+        let src = ((word >> 5) & 31) as u8;
+        let signed = word & (1 << 29) == 0;
+        return if word & (1 << 23) == 0 {
+            Operation::IntegerToFloat(IntegerToFloat {
+                dst,
+                src,
+                word: !double,
+                double,
+                signed,
+                lanes,
+            })
+        } else {
+            Operation::FloatToInteger(FloatToInteger {
+                dst,
+                src,
+                word: !double,
+                double,
+                signed,
+                lanes,
+            })
+        };
     }
     if word & 0xff80_0000 == 0x1f00_0000 {
         let subtract = word & (1 << 15) != 0;
