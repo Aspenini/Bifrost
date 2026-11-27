@@ -1,7 +1,7 @@
 use bifrost_core::{Arm64State, GuestAddress};
 use bifrost_decoder_arm64::{
-    FloatBinary, FloatBinaryKind, FloatCompare, FloatConvert, FloatMultiplyAdd, FloatUnary,
-    FloatUnaryKind, IntegerToFloat,
+    FloatBinary, FloatBinaryKind, FloatCompare, FloatConvert, FloatMultiplyAdd, FloatToInteger,
+    FloatUnary, FloatUnaryKind, IntegerToFloat,
 };
 
 use super::ExecutionError;
@@ -83,6 +83,67 @@ fn check_control(cpu: &Arm64State, pc: GuestAddress) -> Result<(), ExecutionErro
     if cpu.fpcr & !(DEFAULT_NAN | ROUNDING_MASK | FLUSH_TO_ZERO) != 0 {
         return Err(ExecutionError::UnsupportedArm64Fpcr { pc, fpcr: cpu.fpcr });
     }
+    Ok(())
+}
+
+pub(super) fn float_to_integer(
+    cpu: &mut Arm64State,
+    pc: GuestAddress,
+    op: FloatToInteger,
+) -> Result<(), ExecutionError> {
+    check_control(cpu, pc)?;
+    let format = if op.double {
+        Format::DOUBLE
+    } else {
+        Format::SINGLE
+    };
+    let operand = format.unpack_input(cpu.v[usize::from(op.src)] as u64, cpu.fpcr, &mut cpu.fpsr);
+    let width = if op.word { 32 } else { 64 };
+    let (integer, flags) = if format.is_nan(operand) {
+        (0, INVALID)
+    } else {
+        let (fraction, exponent) = format.finite(operand);
+        let (magnitude, inexact) =
+            if operand.exponent == format.infinity_exponent() || exponent >= 64 {
+                (u128::MAX, false)
+            } else if exponent >= 0 {
+                (u128::from(fraction) << exponent, false)
+            } else {
+                let shift = (-exponent).min(64) as u32;
+                let truncated = fraction.checked_shr(shift).unwrap_or(0);
+                let discarded = fraction != truncated.checked_shl(shift).unwrap_or(0);
+                (u128::from(truncated), discarded)
+            };
+        let limit = match (op.signed, operand.sign) {
+            (true, true) => 1u128 << (width - 1),
+            (true, false) => (1u128 << (width - 1)) - 1,
+            (false, true) => 0,
+            (false, false) => (1u128 << width) - 1,
+        };
+        let flags = if magnitude > limit {
+            INVALID
+        } else if inexact {
+            INEXACT
+        } else {
+            0
+        };
+        let magnitude = magnitude.min(limit) as u64;
+        let bits = if operand.sign {
+            magnitude.wrapping_neg()
+        } else {
+            magnitude
+        };
+        (bits, flags)
+    };
+    if let Some(dst) = cpu.x.get_mut(usize::from(op.dst)) {
+        *dst = if op.word {
+            u64::from(integer as u32)
+        } else {
+            integer
+        };
+    }
+    cpu.fpsr |= flags;
+    cpu.pc = GuestAddress(pc.0.wrapping_add(4));
     Ok(())
 }
 
@@ -769,6 +830,46 @@ mod tests {
         .unwrap();
         assert_eq!(cpu.v[0], 1 << 63);
         assert_eq!(cpu.fpsr, INPUT_DENORMAL);
+    }
+
+    #[test]
+    fn float_to_integer_truncates_and_saturates_at_the_destination_limits() {
+        let pc = GuestAddress(0x1000);
+        for (value, signed, word, expected, flags) in [
+            (-3.75, true, true, 0xffff_fffd, INEXACT),
+            (-0.75, false, false, 0, INEXACT),
+            (-1.75, false, true, 0, INVALID),
+            (2.0f64.powi(31), true, true, i32::MAX as u64, INVALID),
+            (-2.0f64.powi(31), true, true, 1 << 31, 0),
+            (2.0f64.powi(64), false, false, u64::MAX, INVALID),
+            (2.0f64.powi(63), true, false, i64::MAX as u64, INVALID),
+            (-2.0f64.powi(63), true, false, 1 << 63, 0),
+            (f64::NEG_INFINITY, true, false, 1 << 63, INVALID),
+            (f64::NAN, true, true, 0, INVALID),
+        ] {
+            let mut cpu = Arm64State {
+                pc,
+                fpcr: 1 << 22, // The instruction uses its own rounding mode.
+                ..Default::default()
+            };
+            cpu.v[1] = u128::from(value.to_bits());
+            cpu.x[0] = u64::MAX;
+            float_to_integer(
+                &mut cpu,
+                pc,
+                FloatToInteger {
+                    dst: 0,
+                    src: 1,
+                    word,
+                    double: true,
+                    signed,
+                },
+            )
+            .unwrap();
+            assert_eq!(cpu.x[0], expected);
+            assert_eq!(cpu.fpsr, flags);
+            assert_eq!(cpu.pc, GuestAddress(0x1004));
+        }
     }
 
     #[test]

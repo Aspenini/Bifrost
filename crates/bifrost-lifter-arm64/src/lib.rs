@@ -47,6 +47,10 @@ pub enum LiftError {
         pc: GuestAddress,
         operation: bifrost_decoder_arm64::IntegerToFloat,
     },
+    FloatToInteger {
+        pc: GuestAddress,
+        operation: bifrost_decoder_arm64::FloatToInteger,
+    },
     FloatBinary {
         pc: GuestAddress,
         operation: bifrost_decoder_arm64::FloatBinary,
@@ -106,6 +110,9 @@ impl fmt::Display for LiftError {
             }
             Self::IntegerToFloat { pc, .. } => {
                 write!(f, "ARM64 integer-to-float conversion at {:#x}", pc.0)
+            }
+            Self::FloatToInteger { pc, .. } => {
+                write!(f, "ARM64 float-to-integer conversion at {:#x}", pc.0)
             }
             Self::FloatConvert { pc, .. } => {
                 write!(f, "ARM64 scalar precision conversion at {:#x}", pc.0)
@@ -692,6 +699,9 @@ impl Arm64Lifter {
             }
             Operation::IntegerToFloat(operation) => {
                 return Err(LiftError::IntegerToFloat { pc, operation });
+            }
+            Operation::FloatToInteger(operation) => {
+                return Err(LiftError::FloatToInteger { pc, operation });
             }
             Operation::FloatBinary(operation) => {
                 return Err(LiftError::FloatBinary { pc, operation });

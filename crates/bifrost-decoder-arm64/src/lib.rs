@@ -37,6 +37,15 @@ pub struct IntegerToFloat {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FloatToInteger {
+    pub dst: u8,
+    pub src: u8,
+    pub word: bool,
+    pub double: bool,
+    pub signed: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FloatBinaryKind {
     Add,
     Subtract,
@@ -440,6 +449,7 @@ pub enum Operation {
     },
     FloatMultiplyAdd(FloatMultiplyAdd),
     IntegerToFloat(IntegerToFloat),
+    FloatToInteger(FloatToInteger),
     FloatBinary(FloatBinary),
     FloatCompare(FloatCompare),
     FloatUnary(FloatUnary),
@@ -932,6 +942,15 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
     }
     if word & 0x7fbe_fc00 == 0x1e22_0000 {
         return Operation::IntegerToFloat(IntegerToFloat {
+            dst: (word & 31) as u8,
+            src: ((word >> 5) & 31) as u8,
+            word: word >> 31 == 0,
+            double: word & (1 << 22) != 0,
+            signed: word & (1 << 16) == 0,
+        });
+    }
+    if word & 0x7fbe_fc00 == 0x1e38_0000 {
+        return Operation::FloatToInteger(FloatToInteger {
             dst: (word & 31) as u8,
             src: ((word >> 5) & 31) as u8,
             word: word >> 31 == 0,
