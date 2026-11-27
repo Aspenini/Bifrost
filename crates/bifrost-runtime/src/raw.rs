@@ -9,6 +9,8 @@ use bifrost_core::{
 use bifrost_ir::{InstructionLifter, IrFunction, VerifyError};
 use std::fmt;
 
+#[cfg(feature = "guest-aarch64")]
+mod arm64_float;
 #[cfg(feature = "jit-cranelift")]
 mod jit;
 #[cfg(feature = "jit-cranelift")]
@@ -32,6 +34,11 @@ pub enum ExecutionError {
     Lift(bifrost_lifter_x86::LiftError),
     #[cfg(feature = "guest-aarch64")]
     Arm64Lift(bifrost_lifter_arm64::LiftError),
+    #[cfg(feature = "guest-aarch64")]
+    UnsupportedArm64Fpcr {
+        pc: GuestAddress,
+        fpcr: u32,
+    },
     Verify(VerifyError),
     #[cfg(feature = "interp")]
     Interpreter(bifrost_interpreter::InterpreterError),
@@ -58,6 +65,14 @@ impl fmt::Display for ExecutionError {
             Self::Lift(error) => error.fmt(f),
             #[cfg(feature = "guest-aarch64")]
             Self::Arm64Lift(error) => error.fmt(f),
+            #[cfg(feature = "guest-aarch64")]
+            Self::UnsupportedArm64Fpcr { pc, fpcr } => {
+                write!(
+                    f,
+                    "unsupported ARM64 floating-point control {fpcr:#010x} at {:#x}",
+                    pc.0
+                )
+            }
             Self::Verify(error) => error.fmt(f),
             #[cfg(feature = "interp")]
             Self::Interpreter(error) => error.fmt(f),
@@ -160,6 +175,58 @@ fn report_lift_failure(
             register,
             rt,
         }) => return Ok(ExitReason::Arm64ReadCounter { pc, register, rt }),
+        #[cfg(feature = "guest-aarch64")]
+        ExecutionError::Arm64Lift(bifrost_lifter_arm64::LiftError::FloatMultiplyAdd {
+            pc,
+            operation,
+        }) => {
+            let bifrost_core::CpuState::AArch64(cpu) = &mut thread.cpu else {
+                unreachable!("ARM64 instruction requires ARM64 state");
+            };
+            arm64_float::multiply_add(cpu, pc, operation)?;
+            return Ok(ExitReason::Dispatch(cpu.pc));
+        }
+        #[cfg(feature = "guest-aarch64")]
+        ExecutionError::Arm64Lift(bifrost_lifter_arm64::LiftError::IntegerToFloat {
+            pc,
+            operation,
+        }) => {
+            let bifrost_core::CpuState::AArch64(cpu) = &mut thread.cpu else {
+                unreachable!("ARM64 instruction requires ARM64 state");
+            };
+            arm64_float::integer_to_float(cpu, pc, operation)?;
+            return Ok(ExitReason::Dispatch(cpu.pc));
+        }
+        #[cfg(feature = "guest-aarch64")]
+        ExecutionError::Arm64Lift(bifrost_lifter_arm64::LiftError::FloatBinary {
+            pc,
+            operation,
+        }) => {
+            let bifrost_core::CpuState::AArch64(cpu) = &mut thread.cpu else {
+                unreachable!("ARM64 instruction requires ARM64 state");
+            };
+            arm64_float::binary(cpu, pc, operation)?;
+            return Ok(ExitReason::Dispatch(cpu.pc));
+        }
+        #[cfg(feature = "guest-aarch64")]
+        ExecutionError::Arm64Lift(bifrost_lifter_arm64::LiftError::FloatCompare {
+            pc,
+            operation,
+        }) => {
+            let bifrost_core::CpuState::AArch64(cpu) = &mut thread.cpu else {
+                unreachable!("ARM64 instruction requires ARM64 state");
+            };
+            arm64_float::compare(cpu, pc, operation)?;
+            return Ok(ExitReason::Dispatch(cpu.pc));
+        }
+        #[cfg(feature = "guest-aarch64")]
+        ExecutionError::Arm64Lift(bifrost_lifter_arm64::LiftError::FloatSign { pc, operation }) => {
+            let bifrost_core::CpuState::AArch64(cpu) = &mut thread.cpu else {
+                unreachable!("ARM64 instruction requires ARM64 state");
+            };
+            arm64_float::sign(cpu, pc, operation)?;
+            return Ok(ExitReason::Dispatch(cpu.pc));
+        }
         #[cfg(feature = "guest-aarch64")]
         ExecutionError::Arm64Lift(bifrost_lifter_arm64::LiftError::PointerAuth {
             pc,

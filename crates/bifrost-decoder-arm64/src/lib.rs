@@ -8,6 +8,58 @@ use std::fmt;
 pub const INSTRUCTION_BYTES: u64 = 4;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FloatMultiplyAdd {
+    pub dst: u8,
+    pub lhs: u8,
+    pub rhs: u8,
+    pub addend: u8,
+    pub double: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct IntegerToFloat {
+    pub dst: u8,
+    pub src: u8,
+    pub word: bool,
+    pub double: bool,
+    pub signed: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FloatBinaryKind {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FloatBinary {
+    pub dst: u8,
+    pub lhs: u8,
+    pub rhs: u8,
+    pub double: bool,
+    pub kind: FloatBinaryKind,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FloatCompare {
+    pub lhs: u8,
+    pub rhs: Option<u8>,
+    pub double: bool,
+    pub signal_quiet_nan: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FloatSign {
+    pub dst: u8,
+    pub src: u8,
+    pub lanes: u8,
+    pub double: bool,
+    pub negate: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Reg {
     X(u8),
     Sp,
@@ -308,6 +360,23 @@ pub enum Operation {
         immediate: u8,
         double: bool,
     },
+    MoveVectorImmediate {
+        vector: u8,
+        bits: u128,
+    },
+    VectorLaneMemory {
+        vector: u8,
+        base: Reg,
+        lane: u8,
+        size_log2: u8,
+        load: bool,
+        writeback: Option<Operand>,
+    },
+    FloatMultiplyAdd(FloatMultiplyAdd),
+    IntegerToFloat(IntegerToFloat),
+    FloatBinary(FloatBinary),
+    FloatCompare(FloatCompare),
+    FloatSign(FloatSign),
     Branch {
         target: GuestAddress,
         link: bool,
@@ -631,6 +700,140 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
             to_vector,
             word: word >> 31 == 0,
         };
+    }
+    if word & 0x9ff8_0c00 == 0x0f00_0400 {
+        let cmode = (word >> 12) & 15;
+        let op = word & (1 << 29) != 0;
+        let immediate = u64::from(((word >> 11) & 0xe0) | ((word >> 5) & 31));
+        let lane = match (cmode, op) {
+            (0 | 2 | 4 | 6, false) => (immediate << (4 * cmode)) * 0x0000_0001_0000_0001,
+            (8 | 10, false) => (immediate << (4 * (cmode - 8))) * 0x0001_0001_0001_0001,
+            (12 | 13, false) => {
+                let shift = 8 * (cmode - 11);
+                ((immediate << shift) | ((1 << shift) - 1)) * 0x0000_0001_0000_0001
+            }
+            (14, false) => immediate * 0x0101_0101_0101_0101,
+            (14, true) => (0..8).fold(0, |lane, byte| {
+                let mask = 255 * ((immediate >> byte) & 1);
+                lane | (mask << (8 * byte))
+            }),
+            _ => return Operation::Unsupported,
+        };
+        let lane = u128::from(lane);
+        let bits = if word & (1 << 30) != 0 {
+            lane | (lane << 64)
+        } else {
+            lane
+        };
+        return Operation::MoveVectorImmediate {
+            vector: (word & 31) as u8,
+            bits,
+        };
+    }
+    if word & 0xbf20_0000 == 0x0d00_0000 {
+        let size = ((word >> 10) & 3) as u8;
+        let selector = ((word >> 10) & 7) as u8 | (((word >> 30) & 1) as u8) << 3;
+        let (size_log2, lane) = match (word >> 13) & 7 {
+            0 => (0, selector),
+            2 if size & 1 == 0 => (1, selector >> 1),
+            4 if size == 0 => (2, selector >> 2),
+            4 if size == 1 && selector & 4 == 0 => (3, selector >> 3),
+            _ => return Operation::Unsupported,
+        };
+        let index = reg(word >> 16, false);
+        let writeback = if word & (1 << 23) != 0 {
+            Some(if index == Reg::Zero {
+                Operand::Immediate(1 << size_log2)
+            } else {
+                Operand::Register(index)
+            })
+        } else {
+            if (word >> 16) & 31 != 0 {
+                return Operation::Undefined;
+            }
+            None
+        };
+        return Operation::VectorLaneMemory {
+            vector: (word & 31) as u8,
+            base: reg(word >> 5, true),
+            lane,
+            size_log2,
+            load: word & (1 << 22) != 0,
+            writeback,
+        };
+    }
+    let scalar_sign = matches!(word & 0xffbf_fc00, 0x1e20_c000 | 0x1e21_4000);
+    let vector_sign = word & 0x9fbf_fc00 == 0x0ea0_f800;
+    if scalar_sign || vector_sign {
+        let double = word & (1 << 22) != 0;
+        let quad = word & (1 << 30) != 0;
+        if vector_sign && double && !quad {
+            return Operation::Undefined;
+        }
+        return Operation::FloatSign(FloatSign {
+            dst: (word & 31) as u8,
+            src: ((word >> 5) & 31) as u8,
+            lanes: if scalar_sign {
+                1
+            } else if quad && !double {
+                4
+            } else {
+                2
+            },
+            double,
+            negate: if scalar_sign {
+                word & (1 << 16) != 0
+            } else {
+                word & (1 << 29) != 0
+            },
+        });
+    }
+    if word & 0xffa0_fc07 == 0x1e20_2000 {
+        let rhs = ((word >> 16) & 31) as u8;
+        let zero = word & 8 != 0;
+        if zero && rhs != 0 {
+            return Operation::Undefined;
+        }
+        return Operation::FloatCompare(FloatCompare {
+            lhs: ((word >> 5) & 31) as u8,
+            rhs: (!zero).then_some(rhs),
+            double: word & (1 << 22) != 0,
+            signal_quiet_nan: word & 16 != 0,
+        });
+    }
+    let binary = match word & 0xffa0_fc00 {
+        0x1e20_0800 => Some(FloatBinaryKind::Multiply),
+        0x1e20_1800 => Some(FloatBinaryKind::Divide),
+        0x1e20_2800 => Some(FloatBinaryKind::Add),
+        0x1e20_3800 => Some(FloatBinaryKind::Subtract),
+        _ => None,
+    };
+    if let Some(kind) = binary {
+        return Operation::FloatBinary(FloatBinary {
+            dst: (word & 31) as u8,
+            lhs: ((word >> 5) & 31) as u8,
+            rhs: ((word >> 16) & 31) as u8,
+            double: word & (1 << 22) != 0,
+            kind,
+        });
+    }
+    if word & 0x7fbe_fc00 == 0x1e22_0000 {
+        return Operation::IntegerToFloat(IntegerToFloat {
+            dst: (word & 31) as u8,
+            src: ((word >> 5) & 31) as u8,
+            word: word >> 31 == 0,
+            double: word & (1 << 22) != 0,
+            signed: word & (1 << 16) == 0,
+        });
+    }
+    if word & 0xffa0_8000 == 0x1f00_0000 {
+        return Operation::FloatMultiplyAdd(FloatMultiplyAdd {
+            dst: (word & 31) as u8,
+            lhs: ((word >> 5) & 31) as u8,
+            rhs: ((word >> 16) & 31) as u8,
+            addend: ((word >> 10) & 31) as u8,
+            double: word & (1 << 22) != 0,
+        });
     }
     if word & 0xffa0_1fe0 == 0x1e20_1000 {
         return Operation::MoveFloatImmediate {

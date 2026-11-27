@@ -39,6 +39,26 @@ pub enum LiftError {
         pc: GuestAddress,
         operation: Arm64PointerAuth,
     },
+    FloatMultiplyAdd {
+        pc: GuestAddress,
+        operation: bifrost_decoder_arm64::FloatMultiplyAdd,
+    },
+    IntegerToFloat {
+        pc: GuestAddress,
+        operation: bifrost_decoder_arm64::IntegerToFloat,
+    },
+    FloatBinary {
+        pc: GuestAddress,
+        operation: bifrost_decoder_arm64::FloatBinary,
+    },
+    FloatCompare {
+        pc: GuestAddress,
+        operation: bifrost_decoder_arm64::FloatCompare,
+    },
+    FloatSign {
+        pc: GuestAddress,
+        operation: bifrost_decoder_arm64::FloatSign,
+    },
     UnsupportedInstruction {
         pc: GuestAddress,
         word: u32,
@@ -59,6 +79,23 @@ impl fmt::Display for LiftError {
             }
             Self::ReadCounter { pc, register, .. } => {
                 write!(f, "ARM64 {register:?} timer read at {:#x}", pc.0)
+            }
+            Self::FloatMultiplyAdd { pc, .. } => write!(f, "ARM64 scalar FMADD at {:#x}", pc.0),
+            Self::FloatBinary { pc, operation } => {
+                write!(
+                    f,
+                    "ARM64 scalar floating-point {:?} at {:#x}",
+                    operation.kind, pc.0
+                )
+            }
+            Self::FloatCompare { pc, .. } => {
+                write!(f, "ARM64 scalar floating-point comparison at {:#x}", pc.0)
+            }
+            Self::FloatSign { pc, .. } => {
+                write!(f, "ARM64 floating-point sign operation at {:#x}", pc.0)
+            }
+            Self::IntegerToFloat { pc, .. } => {
+                write!(f, "ARM64 integer-to-float conversion at {:#x}", pc.0)
             }
             Self::UnsupportedInstruction { pc, word, features } => write!(
                 f,
@@ -574,6 +611,89 @@ impl Arm64Lifter {
                 let address = ir.binary(IntOp::Add, base, offset);
                 let ty = [Type::I8, Type::I16, Type::I32, Type::I64][usize::from(size_log2)];
                 ir.access_scalar(reg, address, MemoryLayout { ty, ..QWORD }, load);
+                ir.next(next)
+            }
+            Operation::FloatMultiplyAdd(operation) => {
+                return Err(LiftError::FloatMultiplyAdd { pc, operation });
+            }
+            Operation::IntegerToFloat(operation) => {
+                return Err(LiftError::IntegerToFloat { pc, operation });
+            }
+            Operation::FloatBinary(operation) => {
+                return Err(LiftError::FloatBinary { pc, operation });
+            }
+            Operation::FloatCompare(operation) => {
+                return Err(LiftError::FloatCompare { pc, operation });
+            }
+            Operation::FloatSign(operation) => {
+                return Err(LiftError::FloatSign { pc, operation });
+            }
+            Operation::VectorLaneMemory {
+                vector,
+                base,
+                lane,
+                size_log2,
+                load,
+                writeback,
+            } => {
+                let original = ir.memory_base(base, load);
+                let updated = writeback.map(|offset| {
+                    let offset = ir.operand(offset);
+                    ir.binary(IntOp::Add, original, offset)
+                });
+                let address = ir.address(original);
+                let ty = [Type::I8, Type::I16, Type::I32, Type::I64][usize::from(size_log2)];
+                let layout = MemoryLayout { ty, ..QWORD };
+                let access = if load {
+                    MemoryAccess::Read
+                } else {
+                    MemoryAccess::Write
+                };
+                let guard = ir.value(|out| Op::Guard {
+                    out,
+                    address,
+                    access,
+                    layout,
+                });
+                let register = Register::Arm64(Arm64Reg::V(vector));
+                let vector = ir.value(|out| Op::ReadRegister { out, register });
+                if load {
+                    let value = ir.value(|out| Op::Load { out, guard, layout });
+                    let value = ir.value(|out| Op::VectorInsert {
+                        out,
+                        vector,
+                        lane,
+                        value,
+                    });
+                    ir.emit(Op::WriteRegister { register, value });
+                } else {
+                    let value = ir.value(|out| Op::VectorExtract {
+                        out,
+                        vector,
+                        lane,
+                        ty,
+                    });
+                    ir.emit(Op::Store {
+                        guard,
+                        value,
+                        layout,
+                    });
+                }
+                if let Some(updated) = updated {
+                    ir.write(base, updated);
+                }
+                ir.next(next)
+            }
+            Operation::MoveVectorImmediate { vector, bits } => {
+                let value = ir.value(|out| Op::Const {
+                    out,
+                    ty: Type::V128,
+                    bits,
+                });
+                ir.emit(Op::WriteRegister {
+                    register: Register::Arm64(Arm64Reg::V(vector)),
+                    value,
+                });
                 ir.next(next)
             }
             Operation::MoveFloatImmediate {

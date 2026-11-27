@@ -125,6 +125,14 @@ impl Lowering<'_> {
                 return Ok(());
             }
             Op::Const { out, ty, bits } => {
+                if ty == Type::V128 {
+                    let low = self.immediate(bits as i64);
+                    let high = self.immediate((bits >> 64) as i64);
+                    let value = self.builder.ins().scalar_to_vector(types::I64X2, low);
+                    let value = self.builder.ins().insertlane(value, high, 1);
+                    self.values.insert(out, Scalar { value, width: 128 });
+                    return Ok(());
+                }
                 match ty {
                     Type::I1
                     | Type::I8
@@ -253,6 +261,44 @@ impl Lowering<'_> {
             Op::VectorLow { out, value, ty } => {
                 let low = self.builder.ins().extractlane(self.values[&value].value, 0);
                 (out, low, ty.bit_width())
+            }
+            Op::VectorExtract {
+                out,
+                vector,
+                lane,
+                ty,
+            } => {
+                let width = ty.bit_width();
+                let offset = u32::from(lane) * width;
+                let word = self
+                    .builder
+                    .ins()
+                    .extractlane(self.values[&vector].value, (offset / 64) as u8);
+                let value = self.builder.ins().ushr_imm_u(word, i64::from(offset % 64));
+                (out, value, width)
+            }
+            Op::VectorInsert {
+                out,
+                vector,
+                lane,
+                value,
+            } => {
+                let vector = self.values[&vector].value;
+                let scalar = self.values[&value];
+                let offset = u32::from(lane) * scalar.width;
+                let word = (offset / 64) as u8;
+                let shift = offset % 64;
+                let previous = self.builder.ins().extractlane(vector, word);
+                let mask = (u64::MAX >> (64 - scalar.width)) << shift;
+                let previous = self.builder.ins().band_imm_u(previous, !mask as i64);
+                let bits = self
+                    .builder
+                    .ins()
+                    .ishl_imm_u(scalar.value, i64::from(shift));
+                let bits = self.builder.ins().bor(previous, bits);
+                let value = self.builder.ins().insertlane(vector, bits, word);
+                self.values.insert(out, Scalar { value, width: 128 });
+                return Ok(());
             }
             Op::VectorFromLow { out, value } => {
                 let value = self

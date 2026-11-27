@@ -294,6 +294,18 @@ pub enum Op {
         out: ValueId,
         value: ValueId,
     },
+    VectorExtract {
+        out: ValueId,
+        vector: ValueId,
+        lane: u8,
+        ty: Type,
+    },
+    VectorInsert {
+        out: ValueId,
+        vector: ValueId,
+        lane: u8,
+        value: ValueId,
+    },
     /// Checks an instruction target before committing effects, optionally only on a taken edge.
     CheckTarget {
         address: ValueId,

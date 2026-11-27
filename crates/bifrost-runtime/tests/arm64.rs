@@ -132,6 +132,91 @@ fn reports_precise_fetch_and_data_faults_and_rejects_unsupported_instructions() 
 }
 
 #[test]
+fn floating_point_and_vector_lanes_match_on_both_backends() {
+    let execute = |#[allow(unused_variables)] jit: bool| {
+        let (mut memory, mut thread) = memory_and_thread(
+            &[
+                0x1f41_0800,
+                0x1f04_0863,
+                0x1e62_0261,
+                0x1e61_2805,
+                0x6f07_e5c6,
+                0x4d00_8026,
+                0x4ddf_9027,
+                0x6ea0_f8e9,
+            ],
+            Protection::ReadWrite,
+        );
+        let CpuState::AArch64(cpu) = &mut thread.cpu else {
+            unreachable!()
+        };
+        let epsilon = 2.0f64.powi(-27);
+        cpu.v[0] = u128::from((1.0 + epsilon).to_bits()) | (u128::MAX << 64);
+        cpu.v[1] = u128::from((1.0 - epsilon).to_bits());
+        cpu.v[2] = u128::from((-1.0f64).to_bits()) | (u128::MAX << 64);
+        cpu.v[3] = u128::from(f32::INFINITY.to_bits());
+        cpu.v[7] = 0xdead_beef_0123_4567_89ab_cdef_cafe_babe;
+        cpu.x[19] = 0x1234_5678_ffff_fffd;
+        // The binary32 instruction multiplies infinity by the zero in V4.
+        cpu.fpsr = 1 << 27;
+        let budget = ExecutionBudget { instructions: 8 };
+        let mut trace = Trace::default();
+        let interpret = |memory: &mut AddressSpace, thread: &mut GuestThread, trace: &mut Trace| {
+            RawInterpreter::new(&target(), memory, trace)
+                .unwrap()
+                .run(thread, budget)
+                .unwrap()
+        };
+        #[cfg(all(
+            feature = "jit-cranelift",
+            any(target_arch = "x86_64", target_arch = "aarch64"),
+            any(target_os = "linux", target_os = "windows")
+        ))]
+        let stop = if jit {
+            use bifrost_runtime::raw::{RawJit, SystemJitMemory};
+            RawJit::new(&target(), &mut memory, &mut trace, SystemJitMemory)
+                .unwrap()
+                .run(&mut thread, budget)
+                .unwrap()
+        } else {
+            interpret(&mut memory, &mut thread, &mut trace)
+        };
+        #[cfg(not(all(
+            feature = "jit-cranelift",
+            any(target_arch = "x86_64", target_arch = "aarch64"),
+            any(target_os = "linux", target_os = "windows")
+        )))]
+        let stop = interpret(&mut memory, &mut thread, &mut trace);
+        assert_eq!(stop, ExitReason::BudgetExhausted);
+        assert_eq!(trace.0.len(), 8);
+        let cpu = state(&thread);
+        assert_eq!(cpu.pc, Addr(CODE.0 + 32));
+        assert_eq!(cpu.v[0], u128::from((-2.0f64.powi(-54)).to_bits()));
+        assert_eq!(cpu.v[3], u128::from(f32::NAN.to_bits()));
+        assert_eq!(cpu.v[1], u128::from((-3.0f64).to_bits()));
+        assert_eq!(cpu.v[5], u128::from((-3.0f64).to_bits()));
+        assert_eq!(cpu.v[6], 0xffff_ff00_ffff_ff00_ffff_ff00_ffff_ff00);
+        assert_eq!(cpu.v[7], 0xffff_ff00_0123_4567_89ab_cdef_cafe_babe);
+        assert_eq!(
+            cpu.v[9],
+            cpu.v[7] ^ 0x8000_0000_8000_0000_8000_0000_8000_0000
+        );
+        assert_eq!(cpu.x[1], DATA.0 + 4);
+        let mut lane = [0; 4];
+        memory.read(DATA, &mut lane).unwrap();
+        assert_eq!(u32::from_le_bytes(lane), 0xffff_ff00);
+        assert_eq!(cpu.fpsr, (1 << 27) | 0x11);
+    };
+    execute(false);
+    #[cfg(all(
+        feature = "jit-cranelift",
+        any(target_arch = "x86_64", target_arch = "aarch64"),
+        any(target_os = "linux", target_os = "windows")
+    ))]
+    execute(true);
+}
+
+#[test]
 fn scalar_and_vector_transfers_preserve_bits_and_clear_unused_lanes() {
     let words = [
         0xfd40_0420, // ldr d0,[x1,#8]

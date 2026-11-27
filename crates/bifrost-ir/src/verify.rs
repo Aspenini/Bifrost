@@ -63,6 +63,10 @@ pub enum VerifyErrorKind {
     UndefinedValue(ValueId),
     ExpectedData(ValueId),
     InvalidValueType(Type),
+    InvalidVectorLane {
+        ty: Type,
+        lane: u8,
+    },
     TypeMismatch {
         value: ValueId,
         expected: Type,
@@ -94,6 +98,15 @@ impl fmt::Display for VerifyError {
 }
 
 impl std::error::Error for VerifyError {}
+
+fn check_vector_lane(ty: Type, lane: u8) -> Result<(), VerifyErrorKind> {
+    if !matches!(ty, Type::I8 | Type::I16 | Type::I32 | Type::I64)
+        || u32::from(lane) >= 128 / ty.bit_width()
+    {
+        return Err(VerifyErrorKind::InvalidVectorLane { ty, lane });
+    }
+    Ok(())
+}
 
 pub(crate) fn verify(function: IrFunction) -> Result<VerifiedIrFunction, VerifyError> {
     let mut blocks = BTreeMap::new();
@@ -356,6 +369,26 @@ impl Values {
                 if !matches!(ty, Type::I8 | Type::I16 | Type::I32 | Type::I64) {
                     return Err(VerifyErrorKind::InvalidValueType(ty));
                 }
+                (out, Type::V128)
+            }
+            Op::VectorExtract {
+                out,
+                vector,
+                lane,
+                ty,
+            } => {
+                self.expect(vector, Type::V128)?;
+                check_vector_lane(ty, lane)?;
+                (out, ty)
+            }
+            Op::VectorInsert {
+                out,
+                vector,
+                lane,
+                value,
+            } => {
+                self.expect(vector, Type::V128)?;
+                check_vector_lane(self.data(value)?, lane)?;
                 (out, Type::V128)
             }
             Op::CheckTarget { address, when, .. } => {

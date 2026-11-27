@@ -103,6 +103,27 @@ pub(crate) fn instruction(
         }
         Op::VectorLow { out, value, ty } => (out, Value::new(ty, data(locals, value).bits)),
         Op::VectorFromLow { out, value } => (out, Value::new(Type::V128, data(locals, value).bits)),
+        Op::VectorExtract {
+            out,
+            vector,
+            lane,
+            ty,
+        } => (
+            out,
+            Value::new(
+                ty,
+                data(locals, vector).bits >> (u32::from(lane) * ty.bit_width()),
+            ),
+        ),
+        Op::VectorInsert {
+            out,
+            vector,
+            lane,
+            value,
+        } => (
+            out,
+            data(locals, vector).insert_lane(lane, data(locals, value)),
+        ),
         Op::ReadRegister { out, register } => (out, Value::read(&thread.cpu, register)),
         Op::WriteRegister { register, value } => {
             data(locals, value).write(&mut thread.cpu, register);

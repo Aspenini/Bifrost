@@ -8,6 +8,12 @@ pub(crate) struct Value {
 }
 
 impl Value {
+    pub(crate) fn insert_lane(self, lane: u8, value: Self) -> Self {
+        let width = value.ty.bit_width();
+        let shift = u32::from(lane) * width;
+        let bits = (self.bits & !(mask(width) << shift)) | (value.bits << shift);
+        Self::new(self.ty, bits)
+    }
     pub(crate) fn count_leading_bits(self, sign: bool) -> Self {
         let width = self.ty.bit_width();
         let bits = if sign && self.signed() < 0 {
