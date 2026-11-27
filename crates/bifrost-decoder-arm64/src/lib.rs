@@ -363,6 +363,8 @@ pub enum Operation {
         scale: bool,
         size_log2: u8,
         load: bool,
+        signed: bool,
+        word: bool,
     },
     WordPair {
         first: Reg,
@@ -1300,7 +1302,13 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
             }
         };
     }
-    if word & 0x3fa0_0c00 == 0x3820_0800 {
+    if word & 0x3f20_0c00 == 0x3820_0800 {
+        let size_log2 = (word >> 30) as u8;
+        let signed = word & (1 << 23) != 0;
+        let opc_low = word & (1 << 22) != 0;
+        if signed && (size_log2 == 3 || (size_log2 == 2 && opc_low)) {
+            return Operation::Unsupported;
+        }
         let extend = match (word >> 13) & 7 {
             2 => AddressExtend::UnsignedWord,
             6 => AddressExtend::SignedWord,
@@ -1313,8 +1321,10 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
             index: reg(word >> 16, false),
             extend,
             scale: word & (1 << 12) != 0,
-            size_log2: (word >> 30) as u8,
-            load: word & (1 << 22) != 0,
+            size_log2,
+            load: signed || opc_low,
+            signed,
+            word: signed && opc_low,
         };
     }
     let mode = (word >> 10) & 3;

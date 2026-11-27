@@ -546,24 +546,7 @@ impl Arm64Lifter {
             } => {
                 let base = ir.memory_base(base, true);
                 let address = ir.with_immediate(IntOp::Add, base, offset);
-                let address = ir.address(address);
-                let ty = [Type::I8, Type::I16, Type::I32][usize::from(size_log2)];
-                let layout = MemoryLayout { ty, ..QWORD };
-                let guard = ir.value(|out| Op::Guard {
-                    out,
-                    address,
-                    access: MemoryAccess::Read,
-                    layout,
-                });
-                let value = ir.value(|out| Op::Load { out, guard, layout });
-                let value = ir.cast(value, Type::I64);
-                let value = ir.extend_register(value, 8 << size_log2, true);
-                let value = if word {
-                    ir.extend_register(value, 32, false)
-                } else {
-                    value
-                };
-                ir.write(dst, value);
+                ir.load_signed(dst, address, size_log2, word);
                 ir.next(next)
             }
             Operation::OrderedMemory {
@@ -657,6 +640,8 @@ impl Arm64Lifter {
                 scale,
                 size_log2,
                 load,
+                signed,
+                word,
             } => {
                 let base = ir.memory_base(base, load);
                 let index = ir.read(index);
@@ -668,8 +653,12 @@ impl Arm64Lifter {
                     false,
                 );
                 let address = ir.binary(IntOp::Add, base, offset);
-                let ty = [Type::I8, Type::I16, Type::I32, Type::I64][usize::from(size_log2)];
-                ir.access_scalar(reg, address, MemoryLayout { ty, ..QWORD }, load);
+                if signed {
+                    ir.load_signed(reg, address, size_log2, word);
+                } else {
+                    let ty = [Type::I8, Type::I16, Type::I32, Type::I64][usize::from(size_log2)];
+                    ir.access_scalar(reg, address, MemoryLayout { ty, ..QWORD }, load);
+                }
                 ir.next(next)
             }
             Operation::FloatMultiplyAdd(operation) => {
@@ -1550,6 +1539,27 @@ impl Builder {
                 layout,
             });
         }
+    }
+
+    fn load_signed(&mut self, reg: Reg, address: ValueId, size_log2: u8, word: bool) {
+        let address = self.address(address);
+        let ty = [Type::I8, Type::I16, Type::I32][usize::from(size_log2)];
+        let layout = MemoryLayout { ty, ..QWORD };
+        let guard = self.value(|out| Op::Guard {
+            out,
+            address,
+            access: MemoryAccess::Read,
+            layout,
+        });
+        let value = self.value(|out| Op::Load { out, guard, layout });
+        let value = self.cast(value, Type::I64);
+        let value = self.extend_register(value, 8 << size_log2, true);
+        let value = if word {
+            self.extend_register(value, 32, false)
+        } else {
+            value
+        };
+        self.write(reg, value);
     }
 
     fn extend_word(&mut self, value: ValueId, extend: AddressExtend) -> ValueId {

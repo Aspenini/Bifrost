@@ -828,15 +828,52 @@ fn register_offsets_extend_and_scale_before_the_memory_access() {
         &[0xab, 0xef, 0xcd, 0x89, 0x78, 0x56, 0x34, 0x12],
     );
     check_memory_access([0x7825_7820, 0x7865_7822], DATA.0, 2, &[0xab, 0xef]);
+    check_memory_access_result(
+        [0x7825_7820, 0x78e5_7822],
+        DATA.0,
+        2,
+        &[0xab, 0xef],
+        0xffff_efab,
+    );
+    check_memory_access_result(
+        [0x3824_c820, 0x38a4_c822],
+        DATA.0 + 2,
+        1,
+        &[0xab],
+        0xffff_ffff_ffff_ffab,
+    );
+    check_memory_access_result(
+        [0xb823_5820, 0xb8a3_5822],
+        DATA.0,
+        4,
+        &[0xab, 0xef, 0xcd, 0x89],
+        0xffff_ffff_89cd_efab,
+    );
 }
 
 fn check_memory_access(code: [u32; 2], base: u64, offset: usize, expected_bytes: &[u8]) {
+    let mut loaded = [0; 8];
+    loaded[..expected_bytes.len()].copy_from_slice(expected_bytes);
+    check_memory_access_result(
+        code,
+        base,
+        offset,
+        expected_bytes,
+        u64::from_le_bytes(loaded),
+    );
+}
+
+fn check_memory_access_result(
+    code: [u32; 2],
+    base: u64,
+    offset: usize,
+    expected_bytes: &[u8],
+    loaded: u64,
+) {
     let (mut memory, mut thread) = memory_and_thread(&code, Protection::ReadWrite);
     let initial = [1, 2, 3, 4, 5, 6, 7, 8, 9];
     let mut expected = initial;
     expected[offset..offset + expected_bytes.len()].copy_from_slice(expected_bytes);
-    let mut loaded = [0; 8];
-    loaded[..expected_bytes.len()].copy_from_slice(expected_bytes);
     memory.write(DATA, &initial).unwrap();
     let CpuState::AArch64(cpu) = &mut thread.cpu else {
         unreachable!()
@@ -857,7 +894,7 @@ fn check_memory_access(code: [u32; 2], base: u64, offset: usize, expected_bytes:
     let mut bytes = [0; 9];
     memory.read(DATA, &mut bytes).unwrap();
     assert_eq!(bytes, expected);
-    assert_eq!(state(&thread).x[2], u64::from_le_bytes(loaded));
+    assert_eq!(state(&thread).x[2], loaded);
     assert_eq!(state(&thread).x[1], base);
     assert_eq!(state(&thread).x[0], state(&original).x[0]);
 
