@@ -146,6 +146,10 @@ fn floating_point_and_vector_lanes_match_on_both_backends() {
                 0x6ea0_f8e9,
                 0x138c_4d8c, // ror w12,w12,#19 (EXTR alias)
                 0x138c_000d, // extr w13,w0,w12,#0
+                0x1e20_40e8, // fmov s8,s7
+                0x1e60_40eb, // fmov d11,d7
+                0x1e22_c10e, // fcvt d14,s8
+                0x1e62_40af, // fcvt s15,d5
             ],
             Protection::ReadWrite,
         );
@@ -162,7 +166,7 @@ fn floating_point_and_vector_lanes_match_on_both_backends() {
         cpu.x[12] = 0x1234_5678_9988_7766;
         // The binary32 instruction multiplies infinity by the zero in V4.
         cpu.fpsr = 1 << 27;
-        let budget = ExecutionBudget { instructions: 10 };
+        let budget = ExecutionBudget { instructions: 14 };
         let mut trace = Trace::default();
         let interpret = |memory: &mut AddressSpace, thread: &mut GuestThread, trace: &mut Trace| {
             RawInterpreter::new(&target(), memory, trace)
@@ -191,9 +195,9 @@ fn floating_point_and_vector_lanes_match_on_both_backends() {
         )))]
         let stop = interpret(&mut memory, &mut thread, &mut trace);
         assert_eq!(stop, ExitReason::BudgetExhausted);
-        assert_eq!(trace.0.len(), 10);
+        assert_eq!(trace.0.len(), 14);
         let cpu = state(&thread);
-        assert_eq!(cpu.pc, Addr(CODE.0 + 40));
+        assert_eq!(cpu.pc, Addr(CODE.0 + 56));
         assert_eq!(cpu.v[0], u128::from((-2.0f64.powi(-54)).to_bits()));
         assert_eq!(cpu.v[3], u128::from(f32::NAN.to_bits()));
         assert_eq!(cpu.v[1], u128::from((-3.0f64).to_bits()));
@@ -207,6 +211,13 @@ fn floating_point_and_vector_lanes_match_on_both_backends() {
         assert_eq!(cpu.x[1], DATA.0 + 4);
         assert_eq!(cpu.x[12], u64::from(0x9988_7766_u32.rotate_right(19)));
         assert_eq!(cpu.x[13], cpu.x[12]);
+        assert_eq!(cpu.v[8], u128::from(cpu.v[7] as u32));
+        assert_eq!(cpu.v[11], u128::from(cpu.v[7] as u64));
+        assert_eq!(
+            cpu.v[14],
+            u128::from(f64::from(f32::from_bits(cpu.v[8] as u32)).to_bits())
+        );
+        assert_eq!(cpu.v[15], u128::from((-3.0f32).to_bits()));
         let mut lane = [0; 4];
         memory.read(DATA, &mut lane).unwrap();
         assert_eq!(u32::from_le_bytes(lane), 0xffff_ff00);

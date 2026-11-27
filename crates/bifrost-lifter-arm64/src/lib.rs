@@ -59,6 +59,10 @@ pub enum LiftError {
         pc: GuestAddress,
         operation: bifrost_decoder_arm64::FloatSign,
     },
+    FloatConvert {
+        pc: GuestAddress,
+        operation: bifrost_decoder_arm64::FloatConvert,
+    },
     Crc32 {
         pc: GuestAddress,
         operation: bifrost_decoder_arm64::Crc32,
@@ -100,6 +104,9 @@ impl fmt::Display for LiftError {
             }
             Self::IntegerToFloat { pc, .. } => {
                 write!(f, "ARM64 integer-to-float conversion at {:#x}", pc.0)
+            }
+            Self::FloatConvert { pc, .. } => {
+                write!(f, "ARM64 scalar precision conversion at {:#x}", pc.0)
             }
             Self::Crc32 { pc, .. } => write!(f, "ARM64 CRC32 at {:#x}", pc.0),
             Self::UnsupportedInstruction { pc, word, features } => write!(
@@ -657,6 +664,9 @@ impl Arm64Lifter {
             Operation::FloatSign(operation) => {
                 return Err(LiftError::FloatSign { pc, operation });
             }
+            Operation::FloatConvert(operation) => {
+                return Err(LiftError::FloatConvert { pc, operation });
+            }
             Operation::VectorLaneMemory {
                 vector,
                 base,
@@ -724,6 +734,25 @@ impl Arm64Lifter {
                 });
                 ir.emit(Op::WriteRegister {
                     register: Register::Arm64(Arm64Reg::V(vector)),
+                    value,
+                });
+                ir.next(next)
+            }
+            Operation::MoveFloatRegister { dst, src, double } => {
+                let ty = if double { Type::I64 } else { Type::I32 };
+                let source = Register::Arm64(Arm64Reg::V(src));
+                let vector = ir.value(|out| Op::ReadRegister {
+                    out,
+                    register: source,
+                });
+                let value = ir.value(|out| Op::VectorLow {
+                    out,
+                    value: vector,
+                    ty,
+                });
+                let value = ir.value(|out| Op::VectorFromLow { out, value });
+                ir.emit(Op::WriteRegister {
+                    register: Register::Arm64(Arm64Reg::V(dst)),
                     value,
                 });
                 ir.next(next)

@@ -69,6 +69,13 @@ pub struct FloatSign {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FloatConvert {
+    pub dst: u8,
+    pub src: u8,
+    pub to_double: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Reg {
     X(u8),
     Sp,
@@ -376,6 +383,11 @@ pub enum Operation {
         immediate: u8,
         double: bool,
     },
+    MoveFloatRegister {
+        dst: u8,
+        src: u8,
+        double: bool,
+    },
     MoveVectorImmediate {
         vector: u8,
         bits: u128,
@@ -393,6 +405,7 @@ pub enum Operation {
     FloatBinary(FloatBinary),
     FloatCompare(FloatCompare),
     FloatSign(FloatSign),
+    FloatConvert(FloatConvert),
     Crc32(Crc32),
     Branch {
         target: GuestAddress,
@@ -878,6 +891,20 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
             addend: ((word >> 10) & 31) as u8,
             double: word & (1 << 22) != 0,
         });
+    }
+    if matches!(word & 0xffff_fc00, 0x1e22_c000 | 0x1e62_4000) {
+        return Operation::FloatConvert(FloatConvert {
+            dst: (word & 31) as u8,
+            src: ((word >> 5) & 31) as u8,
+            to_double: word & (1 << 22) == 0,
+        });
+    }
+    if word & 0xffbf_fc00 == 0x1e20_4000 {
+        return Operation::MoveFloatRegister {
+            dst: (word & 31) as u8,
+            src: ((word >> 5) & 31) as u8,
+            double: word & (1 << 22) != 0,
+        };
     }
     if word & 0xffa0_1fe0 == 0x1e20_1000 {
         return Operation::MoveFloatImmediate {

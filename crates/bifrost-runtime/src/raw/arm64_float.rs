@@ -1,6 +1,7 @@
 use bifrost_core::{Arm64State, GuestAddress};
 use bifrost_decoder_arm64::{
-    FloatBinary, FloatBinaryKind, FloatCompare, FloatMultiplyAdd, FloatSign, IntegerToFloat,
+    FloatBinary, FloatBinaryKind, FloatCompare, FloatConvert, FloatMultiplyAdd, FloatSign,
+    IntegerToFloat,
 };
 
 use super::ExecutionError;
@@ -74,6 +75,58 @@ fn check_control(cpu: &Arm64State, pc: GuestAddress) -> Result<(), ExecutionErro
     if cpu.fpcr & !(DEFAULT_NAN | ROUNDING_MASK) != 0 {
         return Err(ExecutionError::UnsupportedArm64Fpcr { pc, fpcr: cpu.fpcr });
     }
+    Ok(())
+}
+
+pub(super) fn convert(
+    cpu: &mut Arm64State,
+    pc: GuestAddress,
+    op: FloatConvert,
+) -> Result<(), ExecutionError> {
+    check_control(cpu, pc)?;
+    let (from, to) = if op.to_double {
+        (Format::SINGLE, Format::DOUBLE)
+    } else {
+        (Format::DOUBLE, Format::SINGLE)
+    };
+    let value = from.unpack(cpu.v[usize::from(op.src)] as u64);
+    let (bits, flags) = if from.is_nan(value) {
+        let source_quiet = 1 << (from.fraction - 1);
+        let dest_quiet = 1 << (to.fraction - 1);
+        let flags = if value.fraction & source_quiet == 0 {
+            INVALID
+        } else {
+            0
+        };
+        let bits = if cpu.fpcr & DEFAULT_NAN != 0 {
+            to.infinity(false) | dest_quiet
+        } else {
+            let payload = if op.to_double {
+                value.fraction << (to.fraction - from.fraction)
+            } else {
+                value.fraction >> (from.fraction - to.fraction)
+            };
+            to.infinity(value.sign) | dest_quiet | payload
+        };
+        (bits, flags)
+    } else if value.exponent == from.infinity_exponent() {
+        (to.infinity(value.sign), 0)
+    } else {
+        let (magnitude, base) = from.finite(value);
+        if magnitude == 0 {
+            (to.sign_bit(value.sign), 0)
+        } else {
+            let top = (63 - magnitude.leading_zeros()) as usize;
+            to.round(
+                Wide::shifted(magnitude.into(), 0),
+                top,
+                base,
+                value.sign,
+                (cpu.fpcr >> 22) & 3,
+            )
+        }
+    };
+    write_result(cpu, pc, op.dst, bits, flags);
     Ok(())
 }
 
