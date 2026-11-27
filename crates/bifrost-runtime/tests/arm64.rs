@@ -744,6 +744,11 @@ fn scalar_arithmetic_and_logic_use_the_correct_width_and_flags() {
         (0xd343_fc20, 8, 0, 0x1579_a246_8000_0001, NZCV), // lsr x0,x1,#3
         (0xdac0_0020, 1, 0, 0x8000_0000_2c48_b3d5, NZCV), // rbit x0,x1
         (0x5ac0_0020, 0x8000_000f, 0, 0xf000_0001, NZCV), // rbit w0,w1
+        (0x5ac0_0820, 0x1020_3040, 0, 0x4030_2010, NZCV), // rev w0,w1
+        (0x5ac0_0420, 0x1020_3040, 0, 0x2010_4030, NZCV), // rev16 w0,w1
+        (0xdac0_0420, 0x1020_3040, 0, 0xcdab_3412_2010_4030, NZCV), // rev16 x0,x1
+        (0xdac0_0820, 0x1020_3040, 0, 0x3412_cdab_4030_2010, NZCV), // rev32 x0,x1
+        (0xdac0_0c20, 0x1020_3040, 0, 0x4030_2010_3412_cdab, NZCV), // rev x0,x1
         (0xdac0_1020, 0, 0, 0, NZCV),           // clz x0,x1
         (0x5ac0_1020, 0, 0, 32, NZCV),          // clz w0,w1 with zero low word
         (0x5ac0_1420, 0xff00_0000, 0, 7, NZCV), // cls w0,w1 with negative low word

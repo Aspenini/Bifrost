@@ -272,6 +272,12 @@ pub enum Operation {
         src: Reg,
         word: bool,
     },
+    ReverseBytes {
+        dst: Reg,
+        src: Reg,
+        word: bool,
+        container_log2: u8,
+    },
     CountLeadingBits {
         dst: Reg,
         src: Reg,
@@ -1005,6 +1011,20 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
             dst,
             src: lhs,
             word: word >> 31 == 0,
+        };
+    }
+    if matches!(word & 0x7fff_fc00, 0x5ac0_0400 | 0x5ac0_0800 | 0x5ac0_0c00) {
+        let container_log2 = ((word >> 10) & 3) as u8;
+        let src = reg(word >> 5, false);
+        let word = word >> 31 == 0;
+        if word && container_log2 == 3 {
+            return Operation::Undefined;
+        }
+        return Operation::ReverseBytes {
+            dst,
+            src,
+            word,
+            container_log2,
         };
     }
     if matches!(word & 0x7fff_fc00, 0x5ac0_1000 | 0x5ac0_1400) {

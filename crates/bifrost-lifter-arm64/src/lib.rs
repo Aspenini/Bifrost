@@ -296,6 +296,32 @@ impl Arm64Lifter {
                 ir.write(dst, result);
                 ir.next(next)
             }
+            Operation::ReverseBytes {
+                dst,
+                src,
+                word,
+                container_log2,
+            } => {
+                let mut value = ir.read(src);
+                // Swap adjacent byte groups, doubling the group width at each stage.
+                let stages = [
+                    (8, 0x00ff_00ff_00ff_00ff),
+                    (16, 0x0000_ffff_0000_ffff),
+                    (32, 0x0000_0000_ffff_ffff),
+                ];
+                for (shift, mask) in stages.into_iter().take(usize::from(container_log2)) {
+                    let low = ir.with_immediate(IntOp::And, value, mask);
+                    let low = ir.shift_register(low, RegisterShift::Left, shift, false);
+                    let high = ir.shift_register(value, RegisterShift::LogicalRight, shift, false);
+                    let high = ir.with_immediate(IntOp::And, high, mask);
+                    value = ir.binary(IntOp::Or, low, high);
+                }
+                if word {
+                    value = ir.extend_register(value, 32, false);
+                }
+                ir.write(dst, value);
+                ir.next(next)
+            }
             Operation::CountLeadingBits {
                 dst,
                 src,
