@@ -809,6 +809,42 @@ impl Arm64Lifter {
                 });
                 ir.next(next)
             }
+            Operation::VectorAddAcross {
+                dst,
+                src,
+                size_log2,
+                full_width,
+            } => {
+                let ty = match size_log2 {
+                    0 => Type::I8,
+                    1 => Type::I16,
+                    2 => Type::I32,
+                    _ => unreachable!("invalid ADDV lane size"),
+                };
+                let lanes = (if full_width { 16 } else { 8 }) >> size_log2;
+                let register = Register::Arm64(Arm64Reg::V(src));
+                let vector = ir.value(|out| Op::ReadRegister { out, register });
+                let mut sum = ir.value(|out| Op::VectorLow {
+                    out,
+                    value: vector,
+                    ty,
+                });
+                for lane in 1..lanes {
+                    let value = ir.value(|out| Op::VectorExtract {
+                        out,
+                        vector,
+                        lane,
+                        ty,
+                    });
+                    sum = ir.binary(IntOp::Add, sum, value);
+                }
+                let value = ir.value(|out| Op::VectorFromLow { out, value: sum });
+                ir.emit(Op::WriteRegister {
+                    register: Register::Arm64(Arm64Reg::V(dst)),
+                    value,
+                });
+                ir.next(next)
+            }
             Operation::MoveVectorImmediate { vector, bits } => {
                 let value = ir.value(|out| Op::Const {
                     out,

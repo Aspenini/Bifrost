@@ -456,6 +456,12 @@ pub enum Operation {
         src: u8,
         full_width: bool,
     },
+    VectorAddAcross {
+        dst: u8,
+        src: u8,
+        size_log2: u8,
+        full_width: bool,
+    },
     VectorLaneMemory {
         vector: u8,
         base: Reg,
@@ -805,6 +811,19 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
             dst: (word & 31) as u8,
             src: ((word >> 5) & 31) as u8,
             full_width: word & (1 << 30) != 0,
+        };
+    }
+    if word & 0xbf3f_fc00 == 0x0e31_b800 {
+        let size_log2 = ((word >> 22) & 3) as u8;
+        let full_width = word & (1 << 30) != 0;
+        if size_log2 == 3 || (size_log2 == 2 && !full_width) {
+            return Operation::Unsupported;
+        }
+        return Operation::VectorAddAcross {
+            dst: (word & 31) as u8,
+            src: ((word >> 5) & 31) as u8,
+            size_log2,
+            full_width,
         };
     }
     if word & 0x9ff8_0c00 == 0x0f00_0400 {
