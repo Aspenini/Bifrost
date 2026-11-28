@@ -371,6 +371,10 @@ impl Values {
                 }
                 (out, Type::V128)
             }
+            Op::VectorCountOnes { out, value } => {
+                self.expect(value, Type::V128)?;
+                (out, Type::V128)
+            }
             Op::VectorExtract {
                 out,
                 vector,

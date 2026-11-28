@@ -785,6 +785,30 @@ impl Arm64Lifter {
             Operation::Crc32(operation) => {
                 return Err(LiftError::Crc32 { pc, operation });
             }
+            Operation::VectorCountOnes {
+                dst,
+                src,
+                full_width,
+            } => {
+                let register = Register::Arm64(Arm64Reg::V(src));
+                let value = ir.value(|out| Op::ReadRegister { out, register });
+                let counts = ir.value(|out| Op::VectorCountOnes { out, value });
+                let value = if full_width {
+                    counts
+                } else {
+                    let low = ir.value(|out| Op::VectorLow {
+                        out,
+                        value: counts,
+                        ty: Type::I64,
+                    });
+                    ir.value(|out| Op::VectorFromLow { out, value: low })
+                };
+                ir.emit(Op::WriteRegister {
+                    register: Register::Arm64(Arm64Reg::V(dst)),
+                    value,
+                });
+                ir.next(next)
+            }
             Operation::MoveVectorImmediate { vector, bits } => {
                 let value = ir.value(|out| Op::Const {
                     out,

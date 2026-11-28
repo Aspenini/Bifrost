@@ -451,6 +451,11 @@ pub enum Operation {
         vector: u8,
         bits: u128,
     },
+    VectorCountOnes {
+        dst: u8,
+        src: u8,
+        full_width: bool,
+    },
     VectorLaneMemory {
         vector: u8,
         base: Reg,
@@ -793,6 +798,13 @@ fn operation(word: u32, pc: GuestAddress) -> Operation {
             },
             to_vector,
             word: word >> 31 == 0,
+        };
+    }
+    if word & 0xbfff_fc00 == 0x0e20_5800 {
+        return Operation::VectorCountOnes {
+            dst: (word & 31) as u8,
+            src: ((word >> 5) & 31) as u8,
+            full_width: word & (1 << 30) != 0,
         };
     }
     if word & 0x9ff8_0c00 == 0x0f00_0400 {

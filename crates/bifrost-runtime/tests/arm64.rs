@@ -279,6 +279,8 @@ fn scalar_and_vector_transfers_preserve_bits_and_clear_unused_lanes() {
         0x1e7f_1003, // fmov d3,#-1.5
         0x1e20_1005, // fmov s5,#2.0
         0x3c83_0c22, // str q2,[x1,#48]!
+        0x4e20_584c, // cnt v12.16b,v2.16b
+        0x0e20_5842, // cnt v2.8b,v2.8b
     ];
     let execute = |#[allow(unused_variables)] jit: bool| {
         let (mut memory, mut thread) = memory_and_thread(&words, Protection::ReadWrite);
@@ -329,7 +331,7 @@ fn scalar_and_vector_transfers_preserve_bits_and_clear_unused_lanes() {
         assert_eq!(cpu.x[1], DATA.0 + 48);
         assert_eq!(cpu.x[8], value);
         assert_eq!(cpu.v[0], u128::from(value));
-        assert_eq!(cpu.v[2], lanes);
+        assert_eq!(cpu.v[2], 0x0404_0302_0103_0305);
         assert_eq!(cpu.v[3], u128::from((-1.5f64).to_bits()));
         assert_eq!(cpu.v[4], u128::from(value as u32));
         assert_eq!(cpu.v[5], u128::from(2f32.to_bits()));
@@ -337,6 +339,7 @@ fn scalar_and_vector_transfers_preserve_bits_and_clear_unused_lanes() {
         assert_eq!(cpu.v[7], lanes >> 64);
         assert_eq!(cpu.v[10], u128::from(lanes as u32));
         assert_eq!(cpu.v[11], u128::from((lanes >> 64) as u32));
+        assert_eq!(cpu.v[12], 0x0605_0605_0407_0607_0404_0302_0103_0305);
         let mut scalar = [0; 4];
         memory.read(Addr(DATA.0 + 20), &mut scalar).unwrap();
         assert_eq!(scalar, (value as u32).to_le_bytes());

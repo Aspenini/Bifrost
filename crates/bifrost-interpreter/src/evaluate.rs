@@ -103,6 +103,11 @@ pub(crate) fn instruction(
         }
         Op::VectorLow { out, value, ty } => (out, Value::new(ty, data(locals, value).bits)),
         Op::VectorFromLow { out, value } => (out, Value::new(Type::V128, data(locals, value).bits)),
+        Op::VectorCountOnes { out, value } => {
+            let bytes = data(locals, value).bits.to_le_bytes();
+            let counts = bytes.map(|byte| byte.count_ones() as u8);
+            (out, Value::new(Type::V128, u128::from_le_bytes(counts)))
+        }
         Op::VectorExtract {
             out,
             vector,

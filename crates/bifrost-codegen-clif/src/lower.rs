@@ -6,8 +6,8 @@ use bifrost_ir::{
 };
 use cranelift_codegen::{
     ir::{
-        AbiParam, Function, InstBuilder, MemFlagsData, SigRef, Signature, Value, condcodes::IntCC,
-        types,
+        AbiParam, Endianness, Function, InstBuilder, MemFlagsData, SigRef, Signature, Value,
+        condcodes::IntCC, types,
     },
     isa::TargetIsa,
 };
@@ -266,6 +266,17 @@ impl Lowering<'_> {
             Op::VectorLow { out, value, ty } => {
                 let low = self.builder.ins().extractlane(self.values[&value].value, 0);
                 (out, low, ty.bit_width())
+            }
+            Op::VectorCountOnes { out, value } => {
+                let flags = MemFlagsData::new().with_endianness(Endianness::Little);
+                let bytes =
+                    self.builder
+                        .ins()
+                        .bitcast(types::I8X16, flags, self.values[&value].value);
+                let counts = self.builder.ins().popcnt(bytes);
+                let value = self.builder.ins().bitcast(types::I64X2, flags, counts);
+                self.values.insert(out, Scalar { value, width: 128 });
+                return Ok(());
             }
             Op::VectorExtract {
                 out,

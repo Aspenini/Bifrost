@@ -294,6 +294,11 @@ pub enum Op {
         out: ValueId,
         value: ValueId,
     },
+    /// Count set bits independently in each byte of a V128 value.
+    VectorCountOnes {
+        out: ValueId,
+        value: ValueId,
+    },
     VectorExtract {
         out: ValueId,
         vector: ValueId,

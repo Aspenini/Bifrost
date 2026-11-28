@@ -20,6 +20,7 @@ The raw profile uses little-endian A64 instructions and serialized execution ove
 | Paired memory | 32-bit and 64-bit general-purpose pairs and 32-bit, 64-bit and 128-bit SIMD pairs. Supports signed-offset, pre-index and post-index forms with an Xn or SP base and distinct LDP destinations. |
 | Atomic memory | LDADD, LDCLR, LDSET, and SWP for 8-, 16-, 32-, and 64-bit values, including acquire and release forms and zero-register destinations. |
 | SIMD scalar and vector transfers | B, H, S, D and Q loads and stores with scaled or unscaled immediate offsets, including pre-index and post-index writeback. FMOV supports S/D immediates, same-width S/D register moves, and bit transfers between W/S or X/D registers. |
+| SIMD population count | CNT counts set bits in each byte of 8B and 16B vectors. The 8B form zeroes the upper half of the destination. |
 | Scalar floating point | Binary32 and binary64 fused multiply-add/subtract (FMADD, FMSUB, FNMADD, FNMSUB), FADD, FSUB, FMUL, FDIV, FCMP, FCMPE, FCCMP and FCCMPE, and unscaled SCVTF/UCVTF from W/X registers. The raw runtime shares an exact rounding path across both backends, with cumulative FPSR flags, FPCR rounding modes, default-NaN, and flush-to-zero support. Other FPCR controls are reported as unsupported. |
 | SIMD immediates | Integer MOVI, including byte masks in 64-bit lanes. |
 | SIMD lanes | Single-register LD1/ST1 for one B/H/S/D lane, including immediate and register post-index forms. |
